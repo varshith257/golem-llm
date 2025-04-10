@@ -1,0 +1,36 @@
+[package]
+name = "golem-llm-openrouter"
+version = "0.0.1"
+edition = "2021"
+license = "Apache-2.0"
+homepage = "https://golem.cloud"
+repository = "https://github.com/golemcloud/golem-llm"
+description = "WebAssembly component for working with OpenRouter APIs, with special support for Golem Cloud"
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+golem-llm = { path = "../llm", version = "0.0.1" }
+
+golem-rust = { git = "https://github.com/golemcloud/golem-rust", branch = "durability" }
+reqwest = { git = "https://github.com/golemcloud/reqwest", branch = "update-march-2025", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0" }
+wit-bindgen-rt = { version = "0.40.0", features = ["bitflags"] }
+
+[package.metadata.component]
+package = "golem:llm-openrouter"
+
+[package.metadata.component.bindings]
+generate_unused_types = true
+
+[package.metadata.component.bindings.with]
+"golem:llm/llm@1.0.0" = "golem_llm::golem::llm::llm"
+
+[package.metadata.component.target]
+path = "wit"
+
+[package.metadata.component.target.dependencies]
+"golem:llm" = { path = "wit/deps/golem-llm" }

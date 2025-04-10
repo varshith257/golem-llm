@@ -1,0 +1,16 @@
+[package]
+name = "golem-llm"
+version = "0.0.1"
+edition = "2021"
+license = "Apache-2.0"
+homepage = "https://golem.cloud"
+repository = "https://github.com/golemcloud/golem-llm"
+description = "WebAssembly components for working with LLM APIs, with special support for Golem Cloud"
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[dependencies]
+golem-rust = { git = "https://github.com/golemcloud/golem-rust", branch = "durability" }
+wit-bindgen = { version = "0.40.0" }

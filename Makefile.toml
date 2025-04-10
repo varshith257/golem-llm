@@ -1,0 +1,89 @@
+[config]
+default_to_workspace = false
+skip_core_tasks = true
+
+[tasks.build-anthropic]
+install_crate = true
+command = "cargo-component"
+args=["build", "-p", "golem-llm-anthropic"]
+
+[tasks.build-grok]
+install_crate = true
+command = "cargo-component"
+args=["build", "-p", "golem-llm-grok"]
+
+[tasks.build-openai]
+install_crate = true
+command = "cargo-component"
+args=["build", "-p", "golem-llm-openai"]
+
+[tasks.build-openrouter]
+install_crate = true
+command = "cargo-component"
+args=["build", "-p", "golem-llm-openrouter"]
+
+[tasks.build]
+dependencies = [
+    "build-anthropic",
+    "build-grok",
+    "build-openai",
+    "build-openrouter"
+]
+
+[tasks.release-build-anthropic]
+install_crate = true
+command = "cargo-component"
+args=["build", "-p", "golem-llm-anthropic", "--release"]
+
+[tasks.release-build-grok]
+install_crate = true
+command = "cargo-component"
+args=["build", "-p", "golem-llm-grok", "--release"]
+
+[tasks.release-build-openai]
+install_crate = true
+command = "cargo-component"
+args=["build", "-p", "golem-llm-openai", "--release"]
+
+[tasks.release-build-openrouter]
+install_crate = true
+command = "cargo-component"
+args=["build", "-p", "golem-llm-openrouter", "--release"]
+
+[tasks.release-build]
+dependencies = [
+    "release-build-anthropic",
+    "release-build-grok",
+    "release-build-openai",
+    "release-build-openrouter"
+]
+
+[tasks.wit]
+#condition = { files_modified = { input = [
+#    "wit/llm.wit"
+#], output = [
+#    "llm/wit/deps/golem-llm/llm.wit",
+#    "llm-anthropic/wit/deps/golem-llm/llm.wit",
+#    "llm-grok/wit/deps/golem-llm/llm.wit",
+#    "llm-openai/wit/deps/golem-llm/llm.wit",
+#    "llm-openrouter/wit/deps/golem-llm/llm.wit",
+#] } }
+
+script_runner = "@duckscript"
+script = """
+rm -r llm/wit/deps
+mkdir -p llm/wit/deps/golem-llm
+cp wit/golem-llm.wit llm/wit/deps/golem-llm/golem-llm.wit
+rm -r llm-anthropic/wit/deps
+mkdir -p llm-anthropic/wit/deps/golem-llm
+cp wit/golem-llm.wit llm-anthropic/wit/deps/golem-llm/golem-llm.wit
+rm -r llm-grok/wit/deps
+mkdir -p llm-grok/wit/deps/golem-llm
+cp wit/golem-llm.wit llm-grok/wit/deps/golem-llm/golem-llm.wit
+rm -r llm-openai/wit/deps
+mkdir -p llm-openai/wit/deps/golem-llm
+cp wit/golem-llm.wit llm-openai/wit/deps/golem-llm/golem-llm.wit
+rm -r llm-openrouter/deps
+mkdir -p llm-openrouter/wit/deps/golem-llm
+cp wit/golem-llm.wit llm-openrouter/wit/deps/golem-llm/golem-llm.wit
+"""
