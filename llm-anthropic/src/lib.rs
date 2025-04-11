@@ -1,5 +1,9 @@
-
 use golem_llm::golem::llm::llm::{ChatEvent, ChatStream, Config, Error, Guest, GuestChatStream, Message, StreamEvent, ToolResult};
+
+#[allow(unused)]
+mod apis;
+#[allow(unused)]
+mod models;
 
 struct AnthropicChatStream;
 

@@ -1,3 +1,5 @@
+pub mod config;
+pub mod error;
 
 use wit_bindgen::generate;
 

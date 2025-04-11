@@ -12,5 +12,5 @@ path = "src/lib.rs"
 crate-type = ["rlib"]
 
 [dependencies]
-golem-rust = { git = "https://github.com/golemcloud/golem-rust", branch = "durability" }
+golem-rust = { version = "1.5.1" }
 wit-bindgen = { version = "0.40.0" }

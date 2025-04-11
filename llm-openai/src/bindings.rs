@@ -7,9 +7,9 @@ use golem_llm::golem::llm::llm as __with_name0;
 #[cfg(target_arch = "wasm32")]
 #[link_section = "component-type:wit-bindgen:0.36.0:golem:llm-openai@1.0.0:llm-library:encoded world"]
 #[doc(hidden)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 1653] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xf3\x0b\x01A\x02\x01\
-A\x02\x01BI\x01m\x04\x04user\x09assistant\x06system\x04tool\x04\0\x04role\x03\0\0\
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 1646] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xec\x0b\x01A\x02\x01\
+A\x02\x01BH\x01m\x04\x04user\x09assistant\x06system\x04tool\x04\0\x04role\x03\0\0\
 \x01m\x06\x0finvalid-request\x15authentication-failed\x13rate-limit-exceeded\x0e\
 internal-error\x0bunsupported\x07unknown\x04\0\x0aerror-code\x03\0\x02\x01m\x06\x04\
 stop\x06length\x0atool-calls\x0econtent-filter\x05error\x05other\x04\0\x0dfinish\
@@ -36,12 +36,12 @@ k+\x01r\x02\x07content2\x0atool-calls3\x04\0\x0cstream-delta\x03\04\x01q\x03\x05
 delta\x015\0\x06finish\x01*\0\x05error\x01/\0\x04\0\x0cstream-event\x03\06\x04\0\
 \x0bchat-stream\x03\x01\x01h8\x01p7\x01@\x01\x04self9\0:\x04\0\x1c[method]chat-s\
 tream.get-next\x01;\x01@\x01\x04self9\0\x7f\x04\0\x1c[method]chat-stream.has-nex\
-t\x01<\x01p\x10\x01j\x011\x01/\x01@\x02\x08messages=\x06config$\0>\x04\0\x04send\
-\x01?\x01p\x1b\x01@\x03\x08messages=\x0ctool-results\xc0\0\x06config$\0>\x04\0\x08\
-continue\x01A\x01i8\x01@\x02\x08messages=\x06config$\0\xc2\0\x04\0\x06stream\x01\
-C\x04\0\x13golem:llm/llm@1.0.0\x05\0\x04\0\"golem:llm-openai/llm-library@1.0.0\x04\
-\0\x0b\x11\x01\0\x0bllm-library\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0d\
-wit-component\x070.220.0\x10wit-bindgen-rust\x060.36.0";
+t\x01<\x01p\x10\x01@\x02\x08messages=\x06config$\01\x04\0\x04send\x01>\x01p\x1b\x01\
+@\x03\x08messages=\x0ctool-results?\x06config$\01\x04\0\x08continue\x01@\x01i8\x01\
+@\x02\x08messages=\x06config$\0\xc1\0\x04\0\x06stream\x01B\x04\0\x13golem:llm/ll\
+m@1.0.0\x05\0\x04\0\"golem:llm-openai/llm-library@1.0.0\x04\0\x0b\x11\x01\0\x0bl\
+lm-library\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-component\x070\
+.220.0\x10wit-bindgen-rust\x060.36.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

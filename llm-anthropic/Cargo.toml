@@ -14,7 +14,7 @@ crate-type = ["cdylib"]
 [dependencies]
 golem-llm = { path = "../llm", version = "0.0.1" }
 
-golem-rust = { git = "https://github.com/golemcloud/golem-rust", branch = "durability" }
+golem-rust = "1.5.1"
 reqwest = { git = "https://github.com/golemcloud/reqwest", branch = "update-march-2025", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
