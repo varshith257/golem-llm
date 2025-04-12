@@ -1,27 +1,52 @@
-use std::cell::RefCell;
-use std::task::Poll;
 use crate::client::{CreateModelResponseRequest, Input, InputItem, ResponsesApi};
 use crate::conversions::{
     messages_to_input_items, process_model_response, tool_defs_to_tools,
     tool_results_to_input_items,
 };
 use golem_llm::config::with_config_key;
-use golem_llm::event_source::{Event, EventSource};
-use golem_llm::golem::llm::llm::{ChatEvent, ChatStream, Config, Guest, GuestChatStream, Message, Pollable, StreamEvent, ToolCall, ToolResult};
+use golem_llm::event_source::{Event, EventSource, MessageEvent};
+use golem_llm::golem::llm::llm::{
+    ChatEvent, ChatStream, Config, Error, ErrorCode, Guest, GuestChatStream, Message, Pollable,
+    StreamEvent, ToolCall, ToolResult,
+};
+use std::cell::RefCell;
+use std::task::Poll;
 
 mod client;
 mod conversions;
 
 struct OpenAIChatStream {
-    stream: RefCell<EventSource>
+    stream: RefCell<EventSource>,
 }
 
 impl GuestChatStream for OpenAIChatStream {
     fn get_next(&self) -> Option<Vec<StreamEvent>> {
         let mut stream = self.stream.borrow_mut();
         match stream.poll_next() {
-            Poll::Ready(_) => Some(vec![]), // TODO
-            Poll::Pending => None
+            Poll::Ready(None) => Some(vec![]),
+            Poll::Ready(Some(Err(error))) => Some(vec![StreamEvent::Error(Error {
+                code: ErrorCode::InternalError,
+                message: error.to_string(),
+                provider_error_json: None,
+            })]),
+            Poll::Ready(Some(Ok(event))) => {
+                let mut events = vec![];
+
+                match event {
+                    Event::Open => {}
+                    Event::Message(MessageEvent {
+                        event, data, id, ..
+                    }) => {
+                        if data != "[DONE]" {
+                           // TODO: decode data and convert it to a StreamEvent
+                        }
+                        todo!()
+                    }
+                }
+
+                Some(events)
+            }
+            Poll::Pending => None,
         }
     }
 
@@ -51,7 +76,7 @@ impl OpenAIComponent {
                     max_output_tokens: config.max_tokens,
                     tools,
                     tool_choice: config.tool_choice,
-                    stream: false
+                    stream: false,
                 };
                 match client.create_model_response(request) {
                     Ok(response) => process_model_response(response),
@@ -72,7 +97,7 @@ impl OpenAIComponent {
                     max_output_tokens: config.max_tokens,
                     tools,
                     tool_choice: config.tool_choice,
-                    stream: true
+                    stream: true,
                 };
                 match client.create_model_response(request) {
                     Ok(response) => process_model_response(response),
