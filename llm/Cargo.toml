@@ -12,5 +12,9 @@ path = "src/lib.rs"
 crate-type = ["rlib"]
 
 [dependencies]
-golem-rust = { version = "1.5.1" }
+golem-rust = { workspace = true }
+mime = "0.3.17"
+nom = { version = "7.1", default-features = false }
+reqwest = { workspace = true }
+thiserror = "2.0.12"
 wit-bindgen = { version = "0.40.0" }

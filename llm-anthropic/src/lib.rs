@@ -1,18 +1,17 @@
-use golem_llm::golem::llm::llm::{ChatEvent, ChatStream, Config, Error, Guest, GuestChatStream, Message, StreamEvent, ToolResult};
-
-#[allow(unused)]
-mod apis;
-#[allow(unused)]
-mod models;
+use golem_llm::golem::llm::llm::{ChatEvent, ChatStream, Config, Error, Guest, GuestChatStream, Message, Pollable, StreamEvent, ToolCall, ToolResult};
 
 struct AnthropicChatStream;
 
 impl GuestChatStream for AnthropicChatStream {
-    fn get_next(&self) -> Vec<StreamEvent> {
+    fn get_next(&self) -> Option<Vec<StreamEvent>> {
         todo!()
     }
 
-    fn has_next(&self) -> bool {
+    fn blocking_get_next(&self) -> Vec<StreamEvent> {
+        todo!()
+    }
+
+    fn subscribe(&self) -> Pollable {
         todo!()
     }
 }
@@ -22,11 +21,15 @@ struct AnthropicComponent;
 impl Guest for AnthropicComponent {
     type ChatStream = AnthropicChatStream;
 
-    fn send(messages: Vec<Message>, config: Config) -> Result<ChatEvent, Error> {
+    fn send(messages: Vec<Message>, config: Config) -> ChatEvent {
         todo!()
     }
 
-    fn continue_(messages: Vec<Message>, tool_results: Vec<ToolResult>, config: Config) -> Result<ChatEvent, Error> {
+    fn continue_(
+        messages: Vec<Message>,
+        tool_results: Vec<(ToolCall, ToolResult)>,
+        config: Config,
+    ) -> ChatEvent {
         todo!()
     }
 

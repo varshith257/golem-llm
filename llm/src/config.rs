@@ -1,5 +1,5 @@
-use std::ffi::OsStr;
 use crate::golem::llm::llm::{Error, ErrorCode};
+use std::ffi::OsStr;
 
 pub fn with_config_key<R>(
     key: impl AsRef<OsStr>,

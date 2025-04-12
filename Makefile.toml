@@ -58,32 +58,45 @@ dependencies = [
     "release-build-openrouter"
 ]
 
+[tasks.wit-update]
+install_crate = { crate_name = "wit-deps-cli" }
+command = "wit-deps"
+args = ["update"]
+
 [tasks.wit]
-condition = { files_modified = { input = [
-    "wit/golem-llm.wit"
-], output = [
-    "llm/wit/deps/golem-llm/golem-llm.wit",
-    "llm-anthropic/wit/deps/golem-llm/golem-llm.wit",
-    "llm-grok/wit/deps/golem-llm/golem-llm.wit",
-    "llm-openai/wit/deps/golem-llm/golem-llm.wit",
-    "llm-openrouter/wit/deps/golem-llm/golem-llm.wit",
-] } }
+dependencies = ["wit-update"]
+
+#condition = { files_modified = { input = [
+#    "wit/golem-llm.wit",
+#    "wit/deps/wasi:io",
+#], output = [
+#    "llm/wit/deps/golem-llm/golem-llm.wit",
+#    "llm-anthropic/wit/deps/golem-llm/golem-llm.wit",
+#    "llm-grok/wit/deps/golem-llm/golem-llm.wit",
+#    "llm-openai/wit/deps/golem-llm/golem-llm.wit",
+#    "llm-openrouter/wit/deps/golem-llm/golem-llm.wit",
+#] } }
 
 script_runner = "@duckscript"
 script = """
 rm -r llm/wit/deps
 mkdir llm/wit/deps/golem-llm
 cp wit/golem-llm.wit llm/wit/deps/golem-llm/golem-llm.wit
+cp wit/deps/wasi:io llm/wit/deps
 rm -r llm-anthropic/wit/deps
 mkdir llm-anthropic/wit/deps/golem-llm
 cp wit/golem-llm.wit llm-anthropic/wit/deps/golem-llm/golem-llm.wit
+cp wit/deps/wasi:io llm-anthropic/wit/deps
 rm -r llm-grok/wit/deps
 mkdir llm-grok/wit/deps/golem-llm
 cp wit/golem-llm.wit llm-grok/wit/deps/golem-llm/golem-llm.wit
+cp wit/deps/wasi:io llm-grok/wit/deps
 rm -r llm-openai/wit/deps
 mkdir llm-openai/wit/deps/golem-llm
 cp wit/golem-llm.wit llm-openai/wit/deps/golem-llm/golem-llm.wit
+cp wit/deps/wasi:io llm-openai/wit/deps
 rm -r llm-openrouter/deps
 mkdir llm-openrouter/wit/deps/golem-llm
 cp wit/golem-llm.wit llm-openrouter/wit/deps/golem-llm/golem-llm.wit
+cp wit/deps/wasi:io llm-openrouter/wit/deps
 """
