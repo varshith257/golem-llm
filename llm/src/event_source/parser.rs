@@ -90,7 +90,7 @@ fn comment(input: &str) -> IResult<&str, RawEventLine> {
         take_while_m_n(1, 1, is_colon),
         terminated(take_while(is_any_char), end_of_line),
     )(input)
-        .map(|(input, comment)| (input, RawEventLine::Comment(comment)))
+    .map(|(input, comment)| (input, RawEventLine::Comment(comment)))
 }
 
 #[inline]
@@ -105,7 +105,7 @@ fn field(input: &str) -> IResult<&str, RawEventLine> {
         )),
         end_of_line,
     )(input)
-        .map(|(input, (field, data))| (input, RawEventLine::Field(field, data)))
+    .map(|(input, (field, data))| (input, RawEventLine::Field(field, data)))
 }
 
 #[inline]

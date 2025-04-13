@@ -1,10 +1,12 @@
+use golem_llm::event_source;
+use golem_llm::event_source::EventSource;
 use golem_llm::golem::llm::llm::{Error, ErrorCode};
-use reqwest::{Client, Method, Response, StatusCode};
+use log::trace;
 use reqwest::header::HeaderValue;
+use reqwest::{Client, Method, Response, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use wit_bindgen_rt::async_support::futures::TryFutureExt;
-use golem_llm::event_source::EventSource;
+use std::fmt::Debug;
 
 const BASE_URL: &'static str = "https://api.openai.com";
 
@@ -31,6 +33,8 @@ impl ResponsesApi {
         &self,
         request: CreateModelResponseRequest,
     ) -> Result<CreateModelResponseResponse, Error> {
+        trace!("Sending request to OpenAI API: {request:?}");
+
         let response: Response = self
             .client
             .request(Method::POST, format!("{BASE_URL}/v1/responses"))
@@ -42,18 +46,28 @@ impl ResponsesApi {
         parse_response(response)
     }
 
-    pub fn stream_model_response(&self, request: CreateModelResponseRequest) -> Result<(), Error> {
+    pub fn stream_model_response(
+        &self,
+        request: CreateModelResponseRequest,
+    ) -> Result<EventSource, Error> {
+        trace!("Sending request to OpenAI API: {request:?}");
+
         let response: Response = self
             .client
             .request(Method::POST, format!("{BASE_URL}/v1/responses"))
             .bearer_auth(&self.openai_api_key)
-            .header(reqwest::header::ACCEPT, HeaderValue::from_static("text/event-stream"))
+            .header(
+                reqwest::header::ACCEPT,
+                HeaderValue::from_static("text/event-stream"),
+            )
             .json(&request)
             .send()
             .map_err(|err| from_reqwest_error("Request failed", err))?;
 
-        let stream = EventSource::new(response);
-        todo!()
+        trace!("Initializing SSE stream");
+
+        Ok(EventSource::new(response)
+            .map_err(|err| from_event_source_error("Failed to create SSE stream", err))?)
     }
 }
 
@@ -82,7 +96,8 @@ pub struct CreateModelResponseResponse {
     pub incomplete_details: Option<IncompleteDetailsObject>,
     pub status: Status,
     pub output: Vec<OutputItem>,
-    pub usage: Usage,
+    pub usage: Option<Usage>,
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -222,6 +237,7 @@ pub enum Tool {
         description: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         parameters: Option<serde_json::Value>,
+        strict: bool,
     },
 }
 
@@ -244,6 +260,20 @@ pub struct OutputTokensDetails {
     pub reasoning_tokens: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponseOutputTextDelta {
+    pub content_index: u32,
+    pub delta: String,
+    pub item_id: String,
+    pub output_index: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponseOutputItemDone {
+    pub item: OutputItem,
+    pub output_index: u32,
+}
+
 fn from_reqwest_error(details: impl AsRef<str>, err: reqwest::Error) -> Error {
     Error {
         code: ErrorCode::InternalError,
@@ -252,17 +282,30 @@ fn from_reqwest_error(details: impl AsRef<str>, err: reqwest::Error) -> Error {
     }
 }
 
-fn parse_response<T: DeserializeOwned>(response: Response) -> Result<T, Error> {
+fn from_event_source_error(details: impl AsRef<str>, err: event_source::error::Error) -> Error {
+    Error {
+        code: ErrorCode::InternalError,
+        message: format!("{}: {err}", details.as_ref()),
+        provider_error_json: None,
+    }
+}
+
+fn parse_response<T: DeserializeOwned + Debug>(response: Response) -> Result<T, Error> {
     let status = response.status();
     if status.is_success() {
         let body = response
             .json::<T>()
             .map_err(|err| from_reqwest_error("Failed to decode response body", err))?;
+
+        trace!("Received response from OpenAI API: {body:?}");
+
         Ok(body)
     } else {
         let body = response
             .text()
             .map_err(|err| from_reqwest_error("Failed to receive error response body", err))?;
+
+        trace!("Received {status} response from OpenAI API: {body:?}");
 
         Err(Error {
             code: error_code_from_status(status),

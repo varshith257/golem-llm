@@ -63,6 +63,7 @@ pub fn tool_defs_to_tools(tool_definitions: Vec<ToolDefinition>) -> Result<Vec<T
                     name: tool_def.name,
                     description: tool_def.description,
                     parameters: Some(value),
+                    strict: true,
                 };
                 tools.push(tool);
             }
@@ -121,6 +122,8 @@ pub fn process_model_response(response: CreateModelResponseResponse) -> ChatEven
         let mut contents = Vec::new();
         let mut tool_calls = Vec::new();
 
+        let metadata = create_response_metadata(&response);
+
         for output_item in response.output {
             match output_item {
                 OutputItem::Message { content, .. } => {
@@ -152,18 +155,6 @@ pub fn process_model_response(response: CreateModelResponseResponse) -> ChatEven
             }
         }
 
-        let metadata = ResponseMetadata {
-            finish_reason: None, // TODO
-            usage: Some(Usage {
-                input_tokens: Some(response.usage.input_tokens),
-                output_tokens: Some(response.usage.output_tokens),
-                total_tokens: Some(response.usage.total_tokens),
-            }),
-            provider_id: None,            // TODO
-            timestamp: None,              // TODO
-            provider_metadata_json: None, // TODO
-        };
-
         if contents.is_empty() {
             ChatEvent::ToolRequest(tool_calls)
         } else {
@@ -174,5 +165,19 @@ pub fn process_model_response(response: CreateModelResponseResponse) -> ChatEven
                 metadata,
             })
         }
+    }
+}
+
+pub fn create_response_metadata(response: &CreateModelResponseResponse) -> ResponseMetadata {
+    ResponseMetadata {
+        finish_reason: None, // TODO
+        usage: response.usage.as_ref().map(|usage| Usage {
+            input_tokens: Some(usage.input_tokens),
+            output_tokens: Some(usage.output_tokens),
+            total_tokens: Some(usage.total_tokens),
+        }),
+        provider_id: None, // TODO
+        timestamp: Some(response.created_at.to_string()),
+        provider_metadata_json: response.metadata.as_ref().map(|m| m.to_string()),
     }
 }

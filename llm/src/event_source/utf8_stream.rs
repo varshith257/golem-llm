@@ -1,11 +1,12 @@
 use golem_rust::bindings::wasi::io::streams::{InputStream, StreamError};
 use golem_rust::wasm_rpc::Pollable;
+use log::trace;
 use std::string::FromUtf8Error;
 use std::task::Poll;
 
 pub struct Utf8Stream {
-    stream: InputStream,
     subscription: Pollable,
+    stream: InputStream,
     buffer: Vec<u8>,
     terminated: bool,
 }
@@ -31,6 +32,8 @@ impl Utf8Stream {
         if !self.terminated && self.subscription.ready() {
             match self.stream.read(Self::CHUNK_SIZE) {
                 Ok(bytes) => {
+                    trace!("Read {} bytes from response stream", bytes.len());
+
                     self.buffer.extend_from_slice(bytes.as_ref());
                     let bytes = core::mem::take(&mut self.buffer);
                     match String::from_utf8(bytes) {
@@ -45,6 +48,8 @@ impl Utf8Stream {
                     }
                 }
                 Err(StreamError::Closed) => {
+                    trace!("Response stream closed");
+
                     self.terminated = true;
                     if self.buffer.is_empty() {
                         Poll::Ready(None)

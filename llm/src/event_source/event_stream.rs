@@ -4,10 +4,11 @@ use crate::event_source::MessageEvent;
 use core::fmt;
 use core::time::Duration;
 use golem_rust::bindings::wasi::io::streams::{InputStream, StreamError};
+use golem_rust::wasm_rpc::Pollable;
+use log::trace;
 use nom::error::Error as NomError;
 use std::string::FromUtf8Error;
 use std::task::Poll;
-use golem_rust::wasm_rpc::Pollable;
 
 #[derive(Default, Debug)]
 struct EventBuilder {
@@ -162,6 +163,8 @@ impl EventStream {
     pub fn poll_next(
         &mut self,
     ) -> Poll<Option<Result<MessageEvent, EventStreamError<StreamError>>>> {
+        trace!("Polling for next event");
+
         match parse_event(&mut self.buffer, &mut self.builder) {
             Ok(Some(event)) => {
                 self.last_event_id = event.id.clone();

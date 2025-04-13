@@ -15,9 +15,11 @@ crate-type = ["cdylib"]
 golem-llm = { path = "../llm", version = "0.0.1" }
 
 golem-rust = { workspace = true }
+log = { version = "0.4.27" }
 reqwest =  { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+wasi-logger = { version = "0.1.2" }
 wit-bindgen-rt = { version = "0.40.0", features = ["bitflags"] }
 
 [package.metadata.component]

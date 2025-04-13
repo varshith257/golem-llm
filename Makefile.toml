@@ -95,7 +95,7 @@ rm -r llm-openai/wit/deps
 mkdir llm-openai/wit/deps/golem-llm
 cp wit/golem-llm.wit llm-openai/wit/deps/golem-llm/golem-llm.wit
 cp wit/deps/wasi:io llm-openai/wit/deps
-rm -r llm-openrouter/deps
+rm -r llm-openrouter/wit/deps
 mkdir llm-openrouter/wit/deps/golem-llm
 cp wit/golem-llm.wit llm-openrouter/wit/deps/golem-llm/golem-llm.wit
 cp wit/deps/wasi:io llm-openrouter/wit/deps
