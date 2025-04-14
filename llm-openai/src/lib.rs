@@ -12,6 +12,7 @@ use golem_llm::golem::llm::llm::{
     ChatEvent, ChatStream, Config, ContentPart, Error, ErrorCode, Guest, GuestChatStream, Message,
     Pollable, StreamDelta, StreamEvent, ToolCall, ToolResult,
 };
+use golem_llm::LOGGING_STATE;
 use log::trace;
 use std::cell::RefCell;
 use std::task::Poll;
@@ -224,26 +225,6 @@ impl GuestChatStream for OpenAIChatStream {
     }
 }
 
-struct State {
-    logging_initialized: bool,
-}
-
-impl State {
-    fn init_logging(&mut self) {
-        if !self.logging_initialized {
-            let _ = wasi_logger::Logger::install();
-            self.logging_initialized = true;
-        }
-    }
-}
-
-thread_local! {
-    /// This holds the state of our application.
-    static STATE: RefCell<State> = RefCell::new(State {
-        logging_initialized: false,
-    });
-}
-
 struct OpenAIComponent;
 
 impl OpenAIComponent {
@@ -300,7 +281,7 @@ impl Guest for OpenAIComponent {
     type ChatStream = OpenAIChatStream;
 
     fn send(messages: Vec<Message>, config: Config) -> ChatEvent {
-        STATE.with_borrow_mut(|state| state.init_logging());
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
 
         with_config_key(Self::ENV_VAR_NAME, ChatEvent::Error, |openai_api_key| {
             let client = ResponsesApi::new(openai_api_key);
@@ -315,7 +296,7 @@ impl Guest for OpenAIComponent {
         tool_results: Vec<(ToolCall, ToolResult)>,
         config: Config,
     ) -> ChatEvent {
-        STATE.with_borrow_mut(|state| state.init_logging());
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
 
         with_config_key(Self::ENV_VAR_NAME, ChatEvent::Error, |openai_api_key| {
             let client = ResponsesApi::new(openai_api_key);
@@ -327,7 +308,7 @@ impl Guest for OpenAIComponent {
     }
 
     fn stream(messages: Vec<Message>, config: Config) -> ChatStream {
-        STATE.with_borrow_mut(|state| state.init_logging());
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
 
         ChatStream::new(with_config_key(
             Self::ENV_VAR_NAME,
@@ -339,15 +320,6 @@ impl Guest for OpenAIComponent {
                 Self::streaming_request(client, items, config)
             },
         ))
-    }
-
-    fn enable_debug_traces(enable: bool) {
-        STATE.with_borrow_mut(|state| state.init_logging());
-        if enable {
-            log::set_max_level(log::LevelFilter::Trace);
-        } else {
-            log::set_max_level(log::LevelFilter::Info);
-        }
     }
 }
 

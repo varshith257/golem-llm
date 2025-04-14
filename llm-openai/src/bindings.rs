@@ -9,12 +9,12 @@ use golem_llm::golem::llm::llm as __with_name1;
 #[cfg(target_arch = "wasm32")]
 #[link_section = "component-type:wit-bindgen:0.36.0:golem:llm-openai@1.0.0:llm-library:encoded world"]
 #[doc(hidden)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 1928] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\x86\x0e\x01A\x02\x01\
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 1891] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xe1\x0d\x01A\x02\x01\
 A\x05\x01B\x0a\x04\0\x08pollable\x03\x01\x01h\0\x01@\x01\x04self\x01\0\x7f\x04\0\
 \x16[method]pollable.ready\x01\x02\x01@\x01\x04self\x01\x01\0\x04\0\x16[method]p\
 ollable.block\x01\x03\x01p\x01\x01py\x01@\x01\x02in\x04\0\x05\x04\0\x04poll\x01\x06\
-\x03\0\x12wasi:io/poll@0.2.0\x05\0\x02\x03\0\0\x08pollable\x01BQ\x02\x03\x02\x01\
+\x03\0\x12wasi:io/poll@0.2.0\x05\0\x02\x03\0\0\x08pollable\x01BO\x02\x03\x02\x01\
 \x01\x04\0\x08pollable\x03\0\0\x01m\x04\x04user\x09assistant\x06system\x04tool\x04\
 \0\x04role\x03\0\x02\x01m\x06\x0finvalid-request\x15authentication-failed\x13rat\
 e-limit-exceeded\x0einternal-error\x0bunsupported\x07unknown\x04\0\x0aerror-code\
@@ -46,11 +46,10 @@ ream.blocking-get-next\x01?\x01i\x01\x01@\x01\x04self;\0\xc0\0\x04\0\x1d[method]
 chat-stream.subscribe\x01A\x01p\x12\x01@\x02\x08messages\xc2\0\x06config&\03\x04\
 \0\x04send\x01C\x01o\x02\x16\x1d\x01p\xc4\0\x01@\x03\x08messages\xc2\0\x0ctool-r\
 esults\xc5\0\x06config&\03\x04\0\x08continue\x01F\x01i:\x01@\x02\x08messages\xc2\
-\0\x06config&\0\xc7\0\x04\0\x06stream\x01H\x01@\x01\x06enable\x7f\x01\0\x04\0\x13\
-enable-debug-traces\x01I\x04\0\x13golem:llm/llm@1.0.0\x05\x02\x04\0\"golem:llm-o\
-penai/llm-library@1.0.0\x04\0\x0b\x11\x01\0\x0bllm-library\x03\0\0\0G\x09produce\
-rs\x01\x0cprocessed-by\x02\x0dwit-component\x070.220.0\x10wit-bindgen-rust\x060.\
-36.0";
+\0\x06config&\0\xc7\0\x04\0\x06stream\x01H\x04\0\x13golem:llm/llm@1.0.0\x05\x02\x04\
+\0\"golem:llm-openai/llm-library@1.0.0\x04\0\x0b\x11\x01\0\x0bllm-library\x03\0\0\
+\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-component\x070.220.0\x10wit-bind\
+gen-rust\x060.36.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {

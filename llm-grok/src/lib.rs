@@ -39,8 +39,6 @@ impl Guest for GrokComponent {
     fn stream(messages: Vec<Message>, config: Config) -> ChatStream {
         todo!()
     }
-
-    fn enable_debug_traces(_enable: bool) {}
 }
 
 golem_llm::export_llm!(GrokComponent with_types_in golem_llm);

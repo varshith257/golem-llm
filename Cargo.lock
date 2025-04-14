@@ -336,6 +336,7 @@ dependencies = [
  "nom",
  "reqwest",
  "thiserror",
+ "wasi-logger",
  "wit-bindgen 0.40.0",
 ]
 
