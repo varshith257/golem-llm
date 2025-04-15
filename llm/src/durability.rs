@@ -47,8 +47,8 @@ mod durable_impl {
     use golem_rust::value_and_type::{FromValueAndType, IntoValue};
     use golem_rust::wasm_rpc::{NodeBuilder, WitValueExtractor};
     use golem_rust::{with_persistence_level, PersistenceLevel};
-    use std::fmt::{Display, Formatter};
     use log::warn;
+    use std::fmt::{Display, Formatter};
 
     impl<Impl: Guest> Guest for DurableOpenAI<Impl> {
         type ChatStream = Impl::ChatStream;
@@ -824,5 +824,163 @@ mod durable_impl {
                 Err(format!("UnusedError should be variant 0, but got {idx}"))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::golem::llm::llm::{
+        ChatEvent, CompleteResponse, ContentPart, Error, ErrorCode, FinishReason, ImageDetail,
+        ImageUrl, ResponseMetadata, ToolCall, Usage,
+    };
+    use golem_rust::value_and_type::{FromValueAndType, IntoValueAndType};
+    use std::fmt::Debug;
+
+    fn roundtrip_test<T: Debug + Clone + PartialEq + IntoValueAndType + FromValueAndType>(
+        value: T,
+    ) {
+        let vnt = value.clone().into_value_and_type();
+        let extracted = T::from_value_and_type(vnt).unwrap();
+        assert_eq!(value, extracted);
+    }
+
+    #[test]
+    fn image_detail_roundtrip() {
+        roundtrip_test(ImageDetail::Low);
+        roundtrip_test(ImageDetail::High);
+        roundtrip_test(ImageDetail::Auto);
+    }
+
+    #[test]
+    fn error_roundtrip() {
+        roundtrip_test(Error {
+            code: ErrorCode::InvalidRequest,
+            message: "Invalid request".to_string(),
+            provider_error_json: Some("Provider error".to_string()),
+        });
+        roundtrip_test(Error {
+            code: ErrorCode::AuthenticationFailed,
+            message: "Authentication failed".to_string(),
+            provider_error_json: None,
+        });
+    }
+
+    #[test]
+    fn image_url_roundtrip() {
+        roundtrip_test(ImageUrl {
+            url: "https://example.com/image.png".to_string(),
+            detail: Some(ImageDetail::High),
+        });
+        roundtrip_test(ImageUrl {
+            url: "https://example.com/image.png".to_string(),
+            detail: None,
+        });
+    }
+
+    #[test]
+    fn content_part_roundtrip() {
+        roundtrip_test(ContentPart::Text("Hello".to_string()));
+        roundtrip_test(ContentPart::Image(ImageUrl {
+            url: "https://example.com/image.png".to_string(),
+            detail: Some(ImageDetail::Low),
+        }));
+    }
+
+    #[test]
+    fn usage_roundtrip() {
+        roundtrip_test(Usage {
+            input_tokens: Some(100),
+            output_tokens: Some(200),
+            total_tokens: Some(300),
+        });
+        roundtrip_test(Usage {
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+        });
+    }
+
+    #[test]
+    fn response_metadata_roundtrip() {
+        roundtrip_test(ResponseMetadata {
+            finish_reason: Some(FinishReason::Stop),
+            usage: Some(Usage {
+                input_tokens: Some(100),
+                output_tokens: None,
+                total_tokens: Some(100),
+            }),
+            provider_id: Some("provider_id".to_string()),
+            timestamp: Some("2023-10-01T00:00:00Z".to_string()),
+            provider_metadata_json: Some("{\"key\": \"value\"}".to_string()),
+        });
+        roundtrip_test(ResponseMetadata {
+            finish_reason: None,
+            usage: None,
+            provider_id: None,
+            timestamp: None,
+            provider_metadata_json: None,
+        });
+    }
+
+    #[test]
+    fn complete_response_roundtrip() {
+        roundtrip_test(CompleteResponse {
+            id: "response_id".to_string(),
+            content: vec![
+                ContentPart::Text("Hello".to_string()),
+                ContentPart::Image(ImageUrl {
+                    url: "https://example.com/image.png".to_string(),
+                    detail: Some(ImageDetail::High),
+                }),
+            ],
+            tool_calls: vec![ToolCall {
+                id: "x".to_string(),
+                name: "y".to_string(),
+                arguments_json: "\"z\"".to_string(),
+            }],
+            metadata: ResponseMetadata {
+                finish_reason: Some(FinishReason::Stop),
+                usage: None,
+                provider_id: None,
+                timestamp: None,
+                provider_metadata_json: None,
+            },
+        });
+    }
+
+    #[test]
+    fn chat_event_roundtrip() {
+        roundtrip_test(ChatEvent::Message(CompleteResponse {
+            id: "response_id".to_string(),
+            content: vec![
+                ContentPart::Text("Hello".to_string()),
+                ContentPart::Image(ImageUrl {
+                    url: "https://example.com/image.png".to_string(),
+                    detail: Some(ImageDetail::High),
+                }),
+            ],
+            tool_calls: vec![ToolCall {
+                id: "x".to_string(),
+                name: "y".to_string(),
+                arguments_json: "\"z\"".to_string(),
+            }],
+            metadata: ResponseMetadata {
+                finish_reason: Some(FinishReason::Stop),
+                usage: None,
+                provider_id: None,
+                timestamp: None,
+                provider_metadata_json: None,
+            },
+        }));
+        roundtrip_test(ChatEvent::ToolRequest(vec![ToolCall {
+            id: "x".to_string(),
+            name: "y".to_string(),
+            arguments_json: "\"z\"".to_string(),
+        }]));
+        roundtrip_test(ChatEvent::Error(Error {
+            code: ErrorCode::InvalidRequest,
+            message: "Invalid request".to_string(),
+            provider_error_json: Some("Provider error".to_string()),
+        }));
     }
 }
