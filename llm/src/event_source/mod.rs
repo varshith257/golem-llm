@@ -37,7 +37,12 @@ impl EventSource {
     pub fn new(response: Response) -> Result<Self, Error> {
         match check_response(response) {
             Ok(mut response) => {
-                let handle = unsafe { std::mem::transmute(response.get_raw_input_stream()) };
+                let handle = unsafe {
+                    std::mem::transmute::<
+                        reqwest::InputStream,
+                        golem_rust::bindings::wasi::io::streams::InputStream,
+                    >(response.get_raw_input_stream())
+                };
                 let stream = EventStream::new(handle);
                 Ok(Self {
                     response,

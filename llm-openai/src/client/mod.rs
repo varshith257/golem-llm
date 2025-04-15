@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 
-const BASE_URL: &'static str = "https://api.openai.com";
+const BASE_URL: &str = "https://api.openai.com";
 
 /// The OpenAI API client for creating model responses.
 ///
@@ -66,8 +66,8 @@ impl ResponsesApi {
 
         trace!("Initializing SSE stream");
 
-        Ok(EventSource::new(response)
-            .map_err(|err| from_event_source_error("Failed to create SSE stream", err))?)
+        EventSource::new(response)
+            .map_err(|err| from_event_source_error("Failed to create SSE stream", err))
     }
 }
 
@@ -211,20 +211,15 @@ pub enum InnerInputItem {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum Detail {
     #[serde(rename = "auto")]
+    #[default]
     Auto,
     #[serde(rename = "low")]
     Low,
     #[serde(rename = "high")]
     High,
-}
-
-impl Default for Detail {
-    fn default() -> Self {
-        Detail::Auto
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,4 +1,5 @@
 pub mod config;
+pub mod durability;
 pub mod error;
 
 #[allow(dead_code)]
@@ -15,10 +16,10 @@ wit_bindgen::generate!({
     }
 });
 
-use std::cell::RefCell;
-use std::str::FromStr;
 pub use crate::exports::golem;
 pub use __export_llm_library_impl as export_llm;
+use std::cell::RefCell;
+use std::str::FromStr;
 
 pub struct LoggingState {
     logging_initialized: bool,
@@ -39,7 +40,7 @@ impl LoggingState {
 
 thread_local! {
     /// This holds the state of our application.
-    pub static LOGGING_STATE: RefCell<LoggingState> = RefCell::new(LoggingState {
+    pub static LOGGING_STATE: RefCell<LoggingState> = const { RefCell::new(LoggingState {
         logging_initialized: false,
-    });
+    }) };
 }

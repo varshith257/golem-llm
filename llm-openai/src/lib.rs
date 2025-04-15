@@ -7,6 +7,7 @@ use crate::conversions::{
     tool_defs_to_tools, tool_results_to_input_items,
 };
 use golem_llm::config::with_config_key;
+use golem_llm::durability::DurableOpenAI;
 use golem_llm::event_source::{Event, EventSource, MessageEvent};
 use golem_llm::golem::llm::llm::{
     ChatEvent, ChatStream, Config, ContentPart, Error, ErrorCode, Guest, GuestChatStream, Message,
@@ -191,13 +192,11 @@ impl GuestChatStream for OpenAIChatStream {
                 }
                 Poll::Pending => None,
             }
+        } else if let Some(error) = self.failure.clone() {
+            *self.finished.borrow_mut() = true;
+            Some(vec![StreamEvent::Error(error)])
         } else {
-            if let Some(error) = self.failure.clone() {
-                *self.finished.borrow_mut() = true;
-                Some(vec![StreamEvent::Error(error)])
-            } else {
-                None
-            }
+            None
         }
     }
 
@@ -323,4 +322,6 @@ impl Guest for OpenAIComponent {
     }
 }
 
-golem_llm::export_llm!(OpenAIComponent with_types_in golem_llm);
+type DurableOpenAIComponent = DurableOpenAI<OpenAIComponent>;
+
+golem_llm::export_llm!(DurableOpenAIComponent with_types_in golem_llm);

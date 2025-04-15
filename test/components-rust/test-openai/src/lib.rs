@@ -9,8 +9,6 @@ struct Component;
 
 impl Guest for Component {
     fn test1() -> String {
-        llm::enable_debug_traces(true);
-
         let config = llm::Config {
             model: "gpt-3.5-turbo".to_string(),
             temperature: Some(0.2),
@@ -64,8 +62,6 @@ impl Guest for Component {
     }
 
     fn test2() -> String {
-        llm::enable_debug_traces(true);
-
         let config = llm::Config {
             model: "gpt-3.5-turbo".to_string(),
             temperature: Some(0.2),
@@ -167,8 +163,6 @@ impl Guest for Component {
     }
 
     fn test3() -> String {
-        llm::enable_debug_traces(true);
-
         let config = llm::Config {
             model: "gpt-3.5-turbo".to_string(),
             temperature: Some(0.2),
@@ -226,8 +220,6 @@ impl Guest for Component {
     }
 
     fn test4() -> String {
-        llm::enable_debug_traces(true);
-
         let config = llm::Config {
             model: "gpt-3.5-turbo".to_string(),
             temperature: Some(0.2),
@@ -306,8 +298,6 @@ impl Guest for Component {
     }
 
     fn test5() {
-        llm::enable_debug_traces(true);
-
         let config = llm::Config {
             model: "gpt-4o-mini".to_string(),
             temperature: None,
@@ -320,35 +310,33 @@ impl Guest for Component {
 
         println!("Sending request to LLM...");
         let response = llm::send(
-            &[llm::Message {
-                role: llm::Role::User,
-                name: None,
-                content: vec![
-                    llm::ContentPart::Text(
-                        "What is on this image?".to_string(),
-                    ),
-                    llm::ContentPart::Image(llm::ImageUrl {
-                        url: "https://blog.vigoo.dev/images/blog-zio-kafka-debugging-3.png".to_string(),
-                        detail: Some(llm::ImageDetail::High)
-                    }),
-                ],
-            },
+            &[
+                llm::Message {
+                    role: llm::Role::User,
+                    name: None,
+                    content: vec![
+                        llm::ContentPart::Text("What is on this image?".to_string()),
+                        llm::ContentPart::Image(llm::ImageUrl {
+                            url: "https://blog.vigoo.dev/images/blog-zio-kafka-debugging-3.png"
+                                .to_string(),
+                            detail: Some(llm::ImageDetail::High),
+                        }),
+                    ],
+                },
                 llm::Message {
                     role: llm::Role::System,
                     name: None,
                     content: vec![llm::ContentPart::Text(
                         "Produce the output in both English and Hungarian".to_string(),
                     )],
-                }
+                },
             ],
             &config,
         );
         println!("Response: {:?}", response);
     }
 
-    fn test6() {
-        llm::enable_debug_traces(true);
-    }
+    fn test6() {}
 }
 
 bindings::export!(Component with_types_in bindings);
