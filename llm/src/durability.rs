@@ -15,7 +15,6 @@ mod passthrough_impl {
         type ChatStream = Impl::ChatStream;
 
         fn send(messages: Vec<Message>, config: Config) -> ChatEvent {
-            warn!("DEBUG: calling send() impl without durability");
             Impl::send(messages, config)
         }
 
@@ -38,24 +37,23 @@ mod durable_impl {
     use crate::durability::DurableOpenAI;
     use crate::golem::llm::llm::{
         ChatEvent, ChatStream, CompleteResponse, Config, ContentPart, Error, ErrorCode,
-        FinishReason, Guest, ImageDetail, ImageUrl, Kv, Message, ResponseMetadata, Role, ToolCall,
-        ToolDefinition, ToolResult, Usage,
+        FinishReason, Guest, GuestChatStream, ImageDetail, ImageUrl, Kv, Message, ResponseMetadata,
+        Role, StreamDelta, StreamEvent, ToolCall, ToolDefinition, ToolFailure, ToolResult,
+        ToolSuccess, Usage,
     };
     use golem_rust::bindings::golem::durability::durability::DurableFunctionType;
     use golem_rust::durability::Durability;
     use golem_rust::value_and_type::type_builder::TypeNodeBuilder;
     use golem_rust::value_and_type::{FromValueAndType, IntoValue};
-    use golem_rust::wasm_rpc::{NodeBuilder, WitValueExtractor};
+    use golem_rust::wasm_rpc::{NodeBuilder, Pollable, WitValueExtractor};
     use golem_rust::{with_persistence_level, PersistenceLevel};
-    use log::warn;
+    use std::cell::RefCell;
     use std::fmt::{Display, Formatter};
 
-    impl<Impl: Guest> Guest for DurableOpenAI<Impl> {
-        type ChatStream = Impl::ChatStream;
+    impl<Impl: Guest + 'static> Guest for DurableOpenAI<Impl> {
+        type ChatStream = DurableChatStream<Impl>;
 
         fn send(messages: Vec<Message>, config: Config) -> ChatEvent {
-            warn!("DEBUG: wrapping send() impl with custom durability");
-
             let durability = Durability::<ChatEvent, UnusedError>::new(
                 "golem_llm",
                 "send",
@@ -76,11 +74,178 @@ mod durable_impl {
             tool_results: Vec<(ToolCall, ToolResult)>,
             config: Config,
         ) -> ChatEvent {
-            Impl::continue_(messages, tool_results, config)
+            let durability = Durability::<ChatEvent, UnusedError>::new(
+                "golem_llm",
+                "continue",
+                DurableFunctionType::WriteRemote,
+            );
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    Impl::continue_(messages.clone(), tool_results.clone(), config.clone())
+                });
+                durability.persist_infallible(
+                    ContinueInput {
+                        messages,
+                        tool_results,
+                        config,
+                    },
+                    result,
+                )
+            } else {
+                durability.replay_infallible()
+            }
         }
 
         fn stream(messages: Vec<Message>, config: Config) -> ChatStream {
-            Impl::stream(messages, config)
+            // TODO: do not start the inner stream in replay mode
+            ChatStream::new(DurableChatStream::<Impl>::new(Impl::stream(
+                messages, config,
+            )))
+        }
+    }
+
+    pub struct DurableChatStream<Impl: Guest> {
+        stream: Impl::ChatStream,
+    }
+
+    impl<Impl: Guest> DurableChatStream<Impl> {
+        fn new(stream: ChatStream) -> Self {
+            Self {
+                stream: stream.into_inner(),
+            }
+        }
+    }
+
+    impl<Impl: Guest + 'static> GuestChatStream for DurableChatStream<Impl> {
+        fn get_next(&self) -> Option<Vec<StreamEvent>> {
+            let durability = Durability::<Option<Vec<StreamEvent>>, UnusedError>::new(
+                "golem_llm",
+                "get_next",
+                DurableFunctionType::ReadRemote,
+            );
+            if durability.is_live() {
+                // TODO: create the stream if it does not exist yet, including the buffered partial result
+                let result = self.stream.get_next();
+                durability.persist_infallible(NoInput, result.clone())
+            } else {
+                // TODO: store in state if it got finished (or errored). otherwise buffer result chunks
+                durability.replay_infallible()
+            }
+        }
+
+        fn blocking_get_next(&self) -> Vec<StreamEvent> {
+            let pollable = self.subscribe();
+            let mut result = Vec::new();
+            loop {
+                pollable.block();
+                match self.get_next() {
+                    Some(events) => {
+                        result.extend(events);
+                        break result;
+                    }
+                    None => continue,
+                }
+            }
+        }
+
+        fn subscribe(&self) -> Pollable {
+            // TODO: how could we create a Pollable that can be "switched" to the new request when switching to live
+            // (some kind of lazy pollable - because during replay it does not have to be a real one as poll result are persisted)
+            self.stream.subscribe()
+        }
+    }
+
+    // variant stream-event {
+    //   delta(stream-delta),
+    //   finish(response-metadata),
+    //   error(error),
+    // }
+    impl IntoValue for StreamEvent {
+        fn add_to_builder<T: NodeBuilder>(self, builder: T) -> T::Result {
+            match self {
+                StreamEvent::Delta(stream_delta) => {
+                    let builder = builder.variant(0);
+                    stream_delta.add_to_builder(builder).finish()
+                }
+                StreamEvent::Finish(response_metadata) => {
+                    let builder = builder.variant(1);
+                    response_metadata.add_to_builder(builder).finish()
+                }
+                StreamEvent::Error(error) => {
+                    let builder = builder.variant(2);
+                    error.add_to_builder(builder).finish()
+                }
+            }
+        }
+
+        fn add_to_type_builder<T: TypeNodeBuilder>(builder: T) -> T::Result {
+            let mut builder = builder.variant();
+            builder = StreamDelta::add_to_type_builder(builder.case("delta"));
+            builder = ResponseMetadata::add_to_type_builder(builder.case("finish"));
+            builder = Error::add_to_type_builder(builder.case("error"));
+            builder.finish()
+        }
+    }
+
+    impl FromValueAndType for StreamEvent {
+        fn from_extractor<'a, 'b>(
+            extractor: &'a impl WitValueExtractor<'a, 'b>,
+        ) -> Result<Self, String> {
+            match extractor.variant() {
+                Some((0, inner)) => Ok(StreamEvent::Delta(StreamDelta::from_extractor(
+                    &inner.ok_or_else(|| "Missing stream-delta body".to_string())?,
+                )?)),
+                Some((1, inner)) => Ok(StreamEvent::Finish(ResponseMetadata::from_extractor(
+                    &inner.ok_or_else(|| "Missing response-metadata body".to_string())?,
+                )?)),
+                Some((2, inner)) => Ok(StreamEvent::Error(Error::from_extractor(
+                    &inner.ok_or_else(|| "Missing error body".to_string())?,
+                )?)),
+                _ => Err("StreamEvent is not a variant".to_string()),
+            }
+        }
+    }
+
+    // record stream-delta {
+    //   content: option<list<content-part>>,
+    //   tool-calls: option<list<tool-call>>,
+    // }
+    impl IntoValue for StreamDelta {
+        fn add_to_builder<T: NodeBuilder>(self, builder: T) -> T::Result {
+            let mut builder = builder.record();
+            builder = self.content.add_to_builder(builder.item());
+            builder = self.tool_calls.add_to_builder(builder.item());
+            builder.finish()
+        }
+
+        fn add_to_type_builder<T: TypeNodeBuilder>(builder: T) -> T::Result {
+            let mut builder = builder.record();
+            builder = TypeNodeBuilder::finish(
+                ContentPart::add_to_type_builder(builder.field("content").option().list()).finish(),
+            );
+            builder = TypeNodeBuilder::finish(
+                ToolCall::add_to_type_builder(builder.field("tool-calls").option().list()).finish(),
+            );
+            builder.finish()
+        }
+    }
+
+    impl FromValueAndType for StreamDelta {
+        fn from_extractor<'a, 'b>(
+            extractor: &'a impl WitValueExtractor<'a, 'b>,
+        ) -> Result<Self, String> {
+            Ok(Self {
+                content: Option::<Vec<ContentPart>>::from_extractor(
+                    &extractor
+                        .field(0)
+                        .ok_or_else(|| "Missing content field".to_string())?,
+                )?,
+                tool_calls: Option::<Vec<ToolCall>>::from_extractor(
+                    &extractor
+                        .field(1)
+                        .ok_or_else(|| "Missing tool-calls field".to_string())?,
+                )?,
+            })
         }
     }
 
@@ -237,6 +402,84 @@ mod durable_impl {
                         .ok_or_else(|| "Missing arguments-json field".to_string())?,
                 )?,
             })
+        }
+    }
+
+    // variant tool-result {
+    //  success(tool-success),
+    //  error(tool-failure),
+    //}
+    impl IntoValue for ToolResult {
+        fn add_to_builder<T: NodeBuilder>(self, builder: T) -> T::Result {
+            match self {
+                ToolResult::Success(success) => {
+                    let builder = builder.variant(0);
+                    success.add_to_builder(builder).finish()
+                }
+                ToolResult::Error(error) => {
+                    let builder = builder.variant(1);
+                    error.add_to_builder(builder).finish()
+                }
+            }
+        }
+
+        fn add_to_type_builder<T: TypeNodeBuilder>(builder: T) -> T::Result {
+            let mut builder = builder.variant();
+            builder = ToolSuccess::add_to_type_builder(builder.case("success"));
+            builder = ToolFailure::add_to_type_builder(builder.case("error"));
+            builder.finish()
+        }
+    }
+
+    // record tool-success {
+    //   id: string,
+    //   name: string,
+    //   result-json: string,
+    //   execution-time-ms: option<u32>,
+    // }
+    impl IntoValue for ToolSuccess {
+        fn add_to_builder<T: NodeBuilder>(self, builder: T) -> T::Result {
+            let mut builder = builder.record();
+            builder = self.id.add_to_builder(builder.item());
+            builder = self.name.add_to_builder(builder.item());
+            builder = self.result_json.add_to_builder(builder.item());
+            builder = self.execution_time_ms.add_to_builder(builder.item());
+            builder.finish()
+        }
+
+        fn add_to_type_builder<T: TypeNodeBuilder>(builder: T) -> T::Result {
+            let mut builder = builder.record();
+            builder = builder.field("id").string();
+            builder = builder.field("name").string();
+            builder = builder.field("result-json").string();
+            builder = TypeNodeBuilder::finish(builder.field("execution-time-ms").option().u32());
+            builder.finish()
+        }
+    }
+
+    // record tool-failure {
+    //   id: string,
+    //   name: string,
+    //   error-message: string,
+    //   error-code: option<string>,
+    // }
+    impl IntoValue for ToolFailure {
+        fn add_to_builder<T: NodeBuilder>(self, builder: T) -> T::Result {
+            let mut builder = builder.record();
+            builder = self.id.add_to_builder(builder.item());
+            builder = self.name.add_to_builder(builder.item());
+            builder = self.error_message.add_to_builder(builder.item());
+            builder = self.error_code.add_to_builder(builder.item());
+            builder.finish()
+        }
+
+        fn add_to_type_builder<T: TypeNodeBuilder>(builder: T) -> T::Result {
+            let mut builder = builder.record();
+            builder = builder.field("id").string();
+            builder = builder.field("name").string();
+            builder = builder.field("error-message").string();
+            builder = TypeNodeBuilder::finish(builder.field("error-code").option().string());
+            builder.finish()
         }
     }
 
@@ -446,6 +689,32 @@ mod durable_impl {
         fn add_to_type_builder<T: TypeNodeBuilder>(builder: T) -> T::Result {
             let mut builder = builder.record();
             builder = Vec::<Message>::add_to_type_builder(builder.field("messages"));
+            builder = Config::add_to_type_builder(builder.field("config"));
+            builder.finish()
+        }
+    }
+
+    #[derive(Debug)]
+    struct ContinueInput {
+        messages: Vec<Message>,
+        tool_results: Vec<(ToolCall, ToolResult)>,
+        config: Config,
+    }
+
+    impl IntoValue for ContinueInput {
+        fn add_to_builder<T: NodeBuilder>(self, builder: T) -> T::Result {
+            let mut builder = builder.record();
+            builder = self.messages.add_to_builder(builder.item());
+            builder = self.tool_results.add_to_builder(builder.item());
+            builder = self.config.add_to_builder(builder.item());
+            builder.finish()
+        }
+
+        fn add_to_type_builder<T: TypeNodeBuilder>(builder: T) -> T::Result {
+            let mut builder = builder.record();
+            builder = Vec::<Message>::add_to_type_builder(builder.field("messages"));
+            builder =
+                Vec::<(ToolCall, ToolResult)>::add_to_type_builder(builder.field("tool-results"));
             builder = Config::add_to_type_builder(builder.field("config"));
             builder.finish()
         }
@@ -789,6 +1058,19 @@ mod durable_impl {
                         .ok_or_else(|| "Missing provider-error-json field".to_string())?,
                 )?,
             })
+        }
+    }
+
+    #[derive(Debug)]
+    struct NoInput;
+
+    impl IntoValue for NoInput {
+        fn add_to_builder<T: NodeBuilder>(self, builder: T) -> T::Result {
+            builder.variant_unit(0)
+        }
+
+        fn add_to_type_builder<T: TypeNodeBuilder>(builder: T) -> T::Result {
+            builder.variant().unit_case("no-input").finish()
         }
     }
 
