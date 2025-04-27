@@ -1,17 +1,22 @@
+use crate::golem::llm::llm::{Config, Guest, Message};
 use std::marker::PhantomData;
 
 pub struct DurableOpenAI<Impl> {
     phantom: PhantomData<Impl>,
 }
 
+pub trait ExtendedGuest: Guest + 'static {
+    fn unwrapped_stream(messages: Vec<Message>, config: Config) -> Self::ChatStream;
+}
+
 #[cfg(not(feature = "durability"))]
 mod passthrough_impl {
-    use crate::durability::DurableOpenAI;
+    use crate::durability::{DurableOpenAI, ExtendedGuest};
     use crate::golem::llm::llm::{
         ChatEvent, ChatStream, Config, Guest, Message, ToolCall, ToolResult,
     };
 
-    impl<Impl: Guest> Guest for DurableOpenAI<Impl> {
+    impl<Impl: ExtendedGuest> Guest for DurableOpenAI<Impl> {
         type ChatStream = Impl::ChatStream;
 
         fn send(messages: Vec<Message>, config: Config) -> ChatEvent {
@@ -34,7 +39,7 @@ mod passthrough_impl {
 
 #[cfg(feature = "durability")]
 mod durable_impl {
-    use crate::durability::DurableOpenAI;
+    use crate::durability::{DurableOpenAI, ExtendedGuest};
     use crate::golem::llm::llm::{
         ChatEvent, ChatStream, CompleteResponse, Config, ContentPart, Error, ErrorCode,
         FinishReason, Guest, GuestChatStream, ImageDetail, ImageUrl, Kv, Message, ResponseMetadata,
@@ -47,10 +52,9 @@ mod durable_impl {
     use golem_rust::value_and_type::{FromValueAndType, IntoValue};
     use golem_rust::wasm_rpc::{NodeBuilder, Pollable, WitValueExtractor};
     use golem_rust::{with_persistence_level, PersistenceLevel};
-    use std::cell::RefCell;
     use std::fmt::{Display, Formatter};
 
-    impl<Impl: Guest + 'static> Guest for DurableOpenAI<Impl> {
+    impl<Impl: ExtendedGuest> Guest for DurableOpenAI<Impl> {
         type ChatStream = DurableChatStream<Impl>;
 
         fn send(messages: Vec<Message>, config: Config) -> ChatEvent {
@@ -98,25 +102,23 @@ mod durable_impl {
 
         fn stream(messages: Vec<Message>, config: Config) -> ChatStream {
             // TODO: do not start the inner stream in replay mode
-            ChatStream::new(DurableChatStream::<Impl>::new(Impl::stream(
+            ChatStream::new(DurableChatStream::<Impl>::new(Impl::unwrapped_stream(
                 messages, config,
             )))
         }
     }
 
-    pub struct DurableChatStream<Impl: Guest> {
+    pub struct DurableChatStream<Impl: ExtendedGuest> {
         stream: Impl::ChatStream,
     }
 
-    impl<Impl: Guest> DurableChatStream<Impl> {
-        fn new(stream: ChatStream) -> Self {
-            Self {
-                stream: stream.into_inner(),
-            }
+    impl<Impl: ExtendedGuest> DurableChatStream<Impl> {
+        fn new(stream: Impl::ChatStream) -> Self {
+            Self { stream }
         }
     }
 
-    impl<Impl: Guest + 'static> GuestChatStream for DurableChatStream<Impl> {
+    impl<Impl: ExtendedGuest> GuestChatStream for DurableChatStream<Impl> {
         fn get_next(&self) -> Option<Vec<StreamEvent>> {
             let durability = Durability::<Option<Vec<StreamEvent>>, UnusedError>::new(
                 "golem_llm",
@@ -672,7 +674,7 @@ mod durable_impl {
         }
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone, PartialEq)]
     struct SendInput {
         messages: Vec<Message>,
         config: Config,
@@ -1107,162 +1109,203 @@ mod durable_impl {
             }
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use crate::golem::llm::llm::{
-        ChatEvent, CompleteResponse, ContentPart, Error, ErrorCode, FinishReason, ImageDetail,
-        ImageUrl, ResponseMetadata, ToolCall, Usage,
-    };
-    use golem_rust::value_and_type::{FromValueAndType, IntoValueAndType};
-    use std::fmt::Debug;
+    #[cfg(test)]
+    mod tests {
+        use crate::durability::durable_impl::SendInput;
+        use crate::golem::llm::llm::{
+            ChatEvent, CompleteResponse, Config, ContentPart, Error, ErrorCode, FinishReason,
+            ImageDetail, ImageUrl, Message, ResponseMetadata, Role, ToolCall, Usage,
+        };
+        use golem_rust::value_and_type::{FromValueAndType, IntoValueAndType};
+        use golem_rust::wasm_rpc::WitTypeNode;
+        use std::fmt::Debug;
 
-    fn roundtrip_test<T: Debug + Clone + PartialEq + IntoValueAndType + FromValueAndType>(
-        value: T,
-    ) {
-        let vnt = value.clone().into_value_and_type();
-        let extracted = T::from_value_and_type(vnt).unwrap();
-        assert_eq!(value, extracted);
-    }
+        fn roundtrip_test<T: Debug + Clone + PartialEq + IntoValueAndType + FromValueAndType>(
+            value: T,
+        ) {
+            let vnt = value.clone().into_value_and_type();
+            let extracted = T::from_value_and_type(vnt).unwrap();
+            assert_eq!(value, extracted);
+        }
 
-    #[test]
-    fn image_detail_roundtrip() {
-        roundtrip_test(ImageDetail::Low);
-        roundtrip_test(ImageDetail::High);
-        roundtrip_test(ImageDetail::Auto);
-    }
+        #[test]
+        fn image_detail_roundtrip() {
+            roundtrip_test(ImageDetail::Low);
+            roundtrip_test(ImageDetail::High);
+            roundtrip_test(ImageDetail::Auto);
+        }
 
-    #[test]
-    fn error_roundtrip() {
-        roundtrip_test(Error {
-            code: ErrorCode::InvalidRequest,
-            message: "Invalid request".to_string(),
-            provider_error_json: Some("Provider error".to_string()),
-        });
-        roundtrip_test(Error {
-            code: ErrorCode::AuthenticationFailed,
-            message: "Authentication failed".to_string(),
-            provider_error_json: None,
-        });
-    }
+        #[test]
+        fn error_roundtrip() {
+            roundtrip_test(Error {
+                code: ErrorCode::InvalidRequest,
+                message: "Invalid request".to_string(),
+                provider_error_json: Some("Provider error".to_string()),
+            });
+            roundtrip_test(Error {
+                code: ErrorCode::AuthenticationFailed,
+                message: "Authentication failed".to_string(),
+                provider_error_json: None,
+            });
+        }
 
-    #[test]
-    fn image_url_roundtrip() {
-        roundtrip_test(ImageUrl {
-            url: "https://example.com/image.png".to_string(),
-            detail: Some(ImageDetail::High),
-        });
-        roundtrip_test(ImageUrl {
-            url: "https://example.com/image.png".to_string(),
-            detail: None,
-        });
-    }
+        #[test]
+        fn image_url_roundtrip() {
+            roundtrip_test(ImageUrl {
+                url: "https://example.com/image.png".to_string(),
+                detail: Some(ImageDetail::High),
+            });
+            roundtrip_test(ImageUrl {
+                url: "https://example.com/image.png".to_string(),
+                detail: None,
+            });
+        }
 
-    #[test]
-    fn content_part_roundtrip() {
-        roundtrip_test(ContentPart::Text("Hello".to_string()));
-        roundtrip_test(ContentPart::Image(ImageUrl {
-            url: "https://example.com/image.png".to_string(),
-            detail: Some(ImageDetail::Low),
-        }));
-    }
+        #[test]
+        fn content_part_roundtrip() {
+            roundtrip_test(ContentPart::Text("Hello".to_string()));
+            roundtrip_test(ContentPart::Image(ImageUrl {
+                url: "https://example.com/image.png".to_string(),
+                detail: Some(ImageDetail::Low),
+            }));
+        }
 
-    #[test]
-    fn usage_roundtrip() {
-        roundtrip_test(Usage {
-            input_tokens: Some(100),
-            output_tokens: Some(200),
-            total_tokens: Some(300),
-        });
-        roundtrip_test(Usage {
-            input_tokens: None,
-            output_tokens: None,
-            total_tokens: None,
-        });
-    }
-
-    #[test]
-    fn response_metadata_roundtrip() {
-        roundtrip_test(ResponseMetadata {
-            finish_reason: Some(FinishReason::Stop),
-            usage: Some(Usage {
+        #[test]
+        fn usage_roundtrip() {
+            roundtrip_test(Usage {
                 input_tokens: Some(100),
+                output_tokens: Some(200),
+                total_tokens: Some(300),
+            });
+            roundtrip_test(Usage {
+                input_tokens: None,
                 output_tokens: None,
-                total_tokens: Some(100),
-            }),
-            provider_id: Some("provider_id".to_string()),
-            timestamp: Some("2023-10-01T00:00:00Z".to_string()),
-            provider_metadata_json: Some("{\"key\": \"value\"}".to_string()),
-        });
-        roundtrip_test(ResponseMetadata {
-            finish_reason: None,
-            usage: None,
-            provider_id: None,
-            timestamp: None,
-            provider_metadata_json: None,
-        });
-    }
+                total_tokens: None,
+            });
+        }
 
-    #[test]
-    fn complete_response_roundtrip() {
-        roundtrip_test(CompleteResponse {
-            id: "response_id".to_string(),
-            content: vec![
-                ContentPart::Text("Hello".to_string()),
-                ContentPart::Image(ImageUrl {
-                    url: "https://example.com/image.png".to_string(),
-                    detail: Some(ImageDetail::High),
-                }),
-            ],
-            tool_calls: vec![ToolCall {
-                id: "x".to_string(),
-                name: "y".to_string(),
-                arguments_json: "\"z\"".to_string(),
-            }],
-            metadata: ResponseMetadata {
+        #[test]
+        fn response_metadata_roundtrip() {
+            roundtrip_test(ResponseMetadata {
                 finish_reason: Some(FinishReason::Stop),
+                usage: Some(Usage {
+                    input_tokens: Some(100),
+                    output_tokens: None,
+                    total_tokens: Some(100),
+                }),
+                provider_id: Some("provider_id".to_string()),
+                timestamp: Some("2023-10-01T00:00:00Z".to_string()),
+                provider_metadata_json: Some("{\"key\": \"value\"}".to_string()),
+            });
+            roundtrip_test(ResponseMetadata {
+                finish_reason: None,
                 usage: None,
                 provider_id: None,
                 timestamp: None,
                 provider_metadata_json: None,
-            },
-        });
-    }
+            });
+        }
 
-    #[test]
-    fn chat_event_roundtrip() {
-        roundtrip_test(ChatEvent::Message(CompleteResponse {
-            id: "response_id".to_string(),
-            content: vec![
-                ContentPart::Text("Hello".to_string()),
-                ContentPart::Image(ImageUrl {
-                    url: "https://example.com/image.png".to_string(),
-                    detail: Some(ImageDetail::High),
-                }),
-            ],
-            tool_calls: vec![ToolCall {
+        #[test]
+        fn complete_response_roundtrip() {
+            roundtrip_test(CompleteResponse {
+                id: "response_id".to_string(),
+                content: vec![
+                    ContentPart::Text("Hello".to_string()),
+                    ContentPart::Image(ImageUrl {
+                        url: "https://example.com/image.png".to_string(),
+                        detail: Some(ImageDetail::High),
+                    }),
+                ],
+                tool_calls: vec![ToolCall {
+                    id: "x".to_string(),
+                    name: "y".to_string(),
+                    arguments_json: "\"z\"".to_string(),
+                }],
+                metadata: ResponseMetadata {
+                    finish_reason: Some(FinishReason::Stop),
+                    usage: None,
+                    provider_id: None,
+                    timestamp: None,
+                    provider_metadata_json: None,
+                },
+            });
+        }
+
+        #[test]
+        fn chat_event_roundtrip() {
+            roundtrip_test(ChatEvent::Message(CompleteResponse {
+                id: "response_id".to_string(),
+                content: vec![
+                    ContentPart::Text("Hello".to_string()),
+                    ContentPart::Image(ImageUrl {
+                        url: "https://example.com/image.png".to_string(),
+                        detail: Some(ImageDetail::High),
+                    }),
+                ],
+                tool_calls: vec![ToolCall {
+                    id: "x".to_string(),
+                    name: "y".to_string(),
+                    arguments_json: "\"z\"".to_string(),
+                }],
+                metadata: ResponseMetadata {
+                    finish_reason: Some(FinishReason::Stop),
+                    usage: None,
+                    provider_id: None,
+                    timestamp: None,
+                    provider_metadata_json: None,
+                },
+            }));
+            roundtrip_test(ChatEvent::ToolRequest(vec![ToolCall {
                 id: "x".to_string(),
                 name: "y".to_string(),
                 arguments_json: "\"z\"".to_string(),
-            }],
-            metadata: ResponseMetadata {
-                finish_reason: Some(FinishReason::Stop),
-                usage: None,
-                provider_id: None,
-                timestamp: None,
-                provider_metadata_json: None,
-            },
-        }));
-        roundtrip_test(ChatEvent::ToolRequest(vec![ToolCall {
-            id: "x".to_string(),
-            name: "y".to_string(),
-            arguments_json: "\"z\"".to_string(),
-        }]));
-        roundtrip_test(ChatEvent::Error(Error {
-            code: ErrorCode::InvalidRequest,
-            message: "Invalid request".to_string(),
-            provider_error_json: Some("Provider error".to_string()),
-        }));
+            }]));
+            roundtrip_test(ChatEvent::Error(Error {
+                code: ErrorCode::InvalidRequest,
+                message: "Invalid request".to_string(),
+                provider_error_json: Some("Provider error".to_string()),
+            }));
+        }
+
+        #[test]
+        fn send_input_encoding() {
+            let input = SendInput {
+                messages: vec![
+                    Message {
+                        role: Role::User,
+                        name: Some("user".to_string()),
+                        content: vec![ContentPart::Text("Hello".to_string())],
+                    },
+                    Message {
+                        role: Role::Assistant,
+                        name: None,
+                        content: vec![ContentPart::Image(ImageUrl {
+                            url: "https://example.com/image.png".to_string(),
+                            detail: Some(ImageDetail::High),
+                        })],
+                    },
+                ],
+                config: Config {
+                    model: "gpt-3.5-turbo".to_string(),
+                    temperature: Some(0.7),
+                    max_tokens: Some(100),
+                    stop_sequences: Some(vec!["\n".to_string()]),
+                    tools: vec![],
+                    tool_choice: None,
+                    provider_options: vec![],
+                },
+            };
+
+            let encoded = input.into_value_and_type();
+            println!("{encoded:#?}");
+
+            for wit_type in encoded.typ.nodes {
+                if let WitTypeNode::ListType(idx) = wit_type {
+                    assert!(idx >= 0);
+                }
+            }
+        }
     }
 }

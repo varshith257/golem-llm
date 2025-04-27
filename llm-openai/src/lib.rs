@@ -7,7 +7,7 @@ use crate::conversions::{
     tool_defs_to_tools, tool_results_to_input_items,
 };
 use golem_llm::config::with_config_key;
-use golem_llm::durability::DurableOpenAI;
+use golem_llm::durability::{DurableOpenAI, ExtendedGuest};
 use golem_llm::event_source::{Event, EventSource, MessageEvent};
 use golem_llm::golem::llm::llm::{
     ChatEvent, ChatStream, Config, ContentPart, Error, ErrorCode, Guest, GuestChatStream, Message,
@@ -307,9 +307,15 @@ impl Guest for OpenAIComponent {
     }
 
     fn stream(messages: Vec<Message>, config: Config) -> ChatStream {
+        ChatStream::new(Self::unwrapped_stream(messages, config))
+    }
+}
+
+impl ExtendedGuest for OpenAIComponent {
+    fn unwrapped_stream(messages: Vec<Message>, config: Config) -> Self::ChatStream {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
-        ChatStream::new(with_config_key(
+        with_config_key(
             Self::ENV_VAR_NAME,
             OpenAIChatStream::failed,
             |openai_api_key| {
@@ -318,7 +324,7 @@ impl Guest for OpenAIComponent {
                 let items = messages_to_input_items(messages);
                 Self::streaming_request(client, items, config)
             },
-        ))
+        )
     }
 }
 
