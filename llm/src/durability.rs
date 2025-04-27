@@ -1,7 +1,7 @@
 use crate::golem::llm::llm::{Config, Guest, Message};
 use std::marker::PhantomData;
 
-pub struct DurableOpenAI<Impl> {
+pub struct DurableLLM<Impl> {
     phantom: PhantomData<Impl>,
 }
 
@@ -11,12 +11,12 @@ pub trait ExtendedGuest: Guest + 'static {
 
 #[cfg(not(feature = "durability"))]
 mod passthrough_impl {
-    use crate::durability::{DurableOpenAI, ExtendedGuest};
+    use crate::durability::{DurableLLM, ExtendedGuest};
     use crate::golem::llm::llm::{
         ChatEvent, ChatStream, Config, Guest, Message, ToolCall, ToolResult,
     };
 
-    impl<Impl: ExtendedGuest> Guest for DurableOpenAI<Impl> {
+    impl<Impl: ExtendedGuest> Guest for DurableLLM<Impl> {
         type ChatStream = Impl::ChatStream;
 
         fn send(messages: Vec<Message>, config: Config) -> ChatEvent {
@@ -39,7 +39,7 @@ mod passthrough_impl {
 
 #[cfg(feature = "durability")]
 mod durable_impl {
-    use crate::durability::{DurableOpenAI, ExtendedGuest};
+    use crate::durability::{DurableLLM, ExtendedGuest};
     use crate::golem::llm::llm::{
         ChatEvent, ChatStream, CompleteResponse, Config, ContentPart, Error, ErrorCode,
         FinishReason, Guest, GuestChatStream, ImageDetail, ImageUrl, Kv, Message, ResponseMetadata,
@@ -57,7 +57,7 @@ mod durable_impl {
     use std::cell::RefCell;
     use std::fmt::{Display, Formatter};
 
-    impl<Impl: ExtendedGuest> Guest for DurableOpenAI<Impl> {
+    impl<Impl: ExtendedGuest> Guest for DurableLLM<Impl> {
         type ChatStream = DurableChatStream<Impl>;
 
         fn send(messages: Vec<Message>, config: Config) -> ChatEvent {

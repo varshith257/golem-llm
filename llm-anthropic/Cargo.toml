@@ -15,6 +15,7 @@ crate-type = ["cdylib"]
 golem-llm = { path = "../llm", version = "0.0.1" }
 
 golem-rust = { workspace = true }
+log = "0.4.27"
 reqwest =  { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

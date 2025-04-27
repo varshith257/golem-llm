@@ -346,6 +346,7 @@ version = "0.0.1"
 dependencies = [
  "golem-llm",
  "golem-rust",
+ "log",
  "reqwest",
  "serde",
  "serde_json",

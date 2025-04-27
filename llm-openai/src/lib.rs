@@ -7,7 +7,7 @@ use crate::conversions::{
     tool_defs_to_tools, tool_results_to_input_items,
 };
 use golem_llm::config::with_config_key;
-use golem_llm::durability::{DurableOpenAI, ExtendedGuest};
+use golem_llm::durability::{DurableLLM, ExtendedGuest};
 use golem_llm::event_source::{Event, EventSource, MessageEvent};
 use golem_llm::golem::llm::llm::{
     ChatEvent, ChatStream, Config, ContentPart, Error, ErrorCode, Guest, GuestChatStream, Message,
@@ -328,6 +328,6 @@ impl ExtendedGuest for OpenAIComponent {
     }
 }
 
-type DurableOpenAIComponent = DurableOpenAI<OpenAIComponent>;
+type DurableOpenAIComponent = DurableLLM<OpenAIComponent>;
 
 golem_llm::export_llm!(DurableOpenAIComponent with_types_in golem_llm);
