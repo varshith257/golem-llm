@@ -46,12 +46,15 @@ mod durable_impl {
         Role, StreamDelta, StreamEvent, ToolCall, ToolDefinition, ToolFailure, ToolResult,
         ToolSuccess, Usage,
     };
-    use golem_rust::bindings::golem::durability::durability::DurableFunctionType;
+    use golem_rust::bindings::golem::durability::durability::{
+        DurableFunctionType, LazyInitializedPollable,
+    };
     use golem_rust::durability::Durability;
     use golem_rust::value_and_type::type_builder::TypeNodeBuilder;
     use golem_rust::value_and_type::{FromValueAndType, IntoValue};
     use golem_rust::wasm_rpc::{NodeBuilder, Pollable, WitValueExtractor};
     use golem_rust::{with_persistence_level, PersistenceLevel};
+    use std::cell::RefCell;
     use std::fmt::{Display, Formatter};
 
     impl<Impl: ExtendedGuest> Guest for DurableOpenAI<Impl> {
@@ -101,20 +104,80 @@ mod durable_impl {
         }
 
         fn stream(messages: Vec<Message>, config: Config) -> ChatStream {
-            // TODO: do not start the inner stream in replay mode
-            ChatStream::new(DurableChatStream::<Impl>::new(Impl::unwrapped_stream(
-                messages, config,
-            )))
+            let durability = Durability::<NoOutput, UnusedError>::new(
+                "golem_llm",
+                "stream",
+                DurableFunctionType::WriteRemote,
+            );
+            if durability.is_live() {
+                let result = with_persistence_level(PersistenceLevel::PersistNothing, || {
+                    ChatStream::new(DurableChatStream::<Impl>::live(Impl::unwrapped_stream(
+                        messages.clone(),
+                        config.clone(),
+                    )))
+                });
+                let _ = durability.persist_infallible(SendInput { messages, config }, NoOutput);
+                result
+            } else {
+                let _: NoOutput = durability.replay_infallible();
+                ChatStream::new(DurableChatStream::<Impl>::replay(messages, config))
+            }
         }
     }
 
+    enum DurableChatStreamState<Impl: ExtendedGuest> {
+        Live {
+            stream: Impl::ChatStream,
+            pollables: Vec<LazyInitializedPollable>,
+        },
+        Replay {
+            original_messages: Vec<Message>,
+            config: Config,
+            pollables: Vec<LazyInitializedPollable>,
+            partial_result: Vec<StreamDelta>,
+            finished: bool,
+        },
+    }
+
     pub struct DurableChatStream<Impl: ExtendedGuest> {
-        stream: Impl::ChatStream,
+        state: RefCell<Option<DurableChatStreamState<Impl>>>,
     }
 
     impl<Impl: ExtendedGuest> DurableChatStream<Impl> {
-        fn new(stream: Impl::ChatStream) -> Self {
-            Self { stream }
+        fn live(stream: Impl::ChatStream) -> Self {
+            Self {
+                state: RefCell::new(Some(DurableChatStreamState::Live {
+                    stream,
+                    pollables: Vec::new(),
+                })),
+            }
+        }
+
+        fn replay(original_messages: Vec<Message>, config: Config) -> Self {
+            Self {
+                state: RefCell::new(Some(DurableChatStreamState::Replay {
+                    original_messages,
+                    config,
+                    pollables: Vec::new(),
+                    partial_result: Vec::new(),
+                    finished: false,
+                })),
+            }
+        }
+    }
+
+    impl<Impl: ExtendedGuest> Drop for DurableChatStream<Impl> {
+        fn drop(&mut self) {
+            // Pollables must be dropped first
+            match self.state.take() {
+                Some(DurableChatStreamState::Live { mut pollables, .. }) => {
+                    pollables.clear();
+                }
+                Some(DurableChatStreamState::Replay { mut pollables, .. }) => {
+                    pollables.clear();
+                }
+                None => {}
+            }
         }
     }
 
@@ -126,12 +189,135 @@ mod durable_impl {
                 DurableFunctionType::ReadRemote,
             );
             if durability.is_live() {
-                // TODO: create the stream if it does not exist yet, including the buffered partial result
-                let result = self.stream.get_next();
-                durability.persist_infallible(NoInput, result.clone())
+                let mut state = self.state.borrow_mut();
+                let (result, new_live_stream) = match &*state {
+                    Some(DurableChatStreamState::Live { stream, .. }) => {
+                        let result =
+                            with_persistence_level(PersistenceLevel::PersistNothing, || {
+                                stream.get_next()
+                            });
+                        (durability.persist_infallible(NoInput, result.clone()), None)
+                    }
+                    Some(DurableChatStreamState::Replay {
+                        original_messages,
+                        config,
+                        pollables,
+                        partial_result,
+                        finished,
+                    }) => {
+                        if *finished {
+                            (None, None)
+                        } else {
+                            let mut extended_messages = Vec::new();
+                            extended_messages.push(Message {
+                                role: Role::System,
+                                name: None,
+                                content: vec![
+                                    ContentPart::Text(
+                                        "You were asked the same question previously, but the response was interrupted before completion. \
+                                        Please continue your response from where you left off. \
+                                        Do not include the part of the response that was already seen.".to_string()),
+                                    ContentPart::Text("Here is the original question:".to_string()),
+                                ],
+                            });
+                            extended_messages.extend_from_slice(original_messages);
+
+                            let mut partial_result_as_content = Vec::new();
+                            for delta in partial_result {
+                                if let Some(contents) = &delta.content {
+                                    partial_result_as_content.extend_from_slice(contents);
+                                }
+                                if let Some(tool_calls) = &delta.tool_calls {
+                                    for tool_call in tool_calls {
+                                        partial_result_as_content.push(ContentPart::Text(format!(
+                                            "<tool-call id=\"{}\" name=\"{}\" arguments=\"{}\"/>",
+                                            tool_call.id, tool_call.name, tool_call.arguments_json,
+                                        )));
+                                    }
+                                }
+                            }
+
+                            extended_messages.push(Message {
+                                role: Role::System,
+                                name: None,
+                                content: vec![ContentPart::Text(
+                                    "Here is the partial response that was successfully received:"
+                                        .to_string(),
+                                )]
+                                .into_iter()
+                                .chain(partial_result_as_content)
+                                .collect(),
+                            });
+
+                            let (stream, first_live_result) =
+                                with_persistence_level(PersistenceLevel::PersistNothing, || {
+                                    let stream = <Impl as ExtendedGuest>::unwrapped_stream(
+                                        extended_messages,
+                                        config.clone(),
+                                    );
+
+                                    for lazy_initialized_pollable in pollables {
+                                        lazy_initialized_pollable.set(stream.subscribe());
+                                    }
+
+                                    let next = stream.get_next();
+                                    (stream, next)
+                                });
+                            durability.persist_infallible(NoInput, first_live_result.clone());
+
+                            (first_live_result, Some(stream))
+                        }
+                    }
+                    None => {
+                        unreachable!()
+                    }
+                };
+
+                if let Some(stream) = new_live_stream {
+                    let pollables = match state.take() {
+                        Some(DurableChatStreamState::Live { pollables, .. }) => pollables,
+                        Some(DurableChatStreamState::Replay { pollables, .. }) => pollables,
+                        None => {
+                            unreachable!()
+                        }
+                    };
+                    *state = Some(DurableChatStreamState::Live { stream, pollables });
+                }
+
+                result
             } else {
-                // TODO: store in state if it got finished (or errored). otherwise buffer result chunks
-                durability.replay_infallible()
+                let result: Option<Vec<StreamEvent>> = durability.replay_infallible();
+                let mut state = self.state.borrow_mut();
+                match &mut *state {
+                    Some(DurableChatStreamState::Live { .. }) => {
+                        unreachable!("Durable chat stream cannot be in live mode during replay")
+                    }
+                    Some(DurableChatStreamState::Replay {
+                        partial_result,
+                        finished,
+                        ..
+                    }) => {
+                        if let Some(result) = &result {
+                            for event in result {
+                                match event {
+                                    StreamEvent::Delta(delta) => {
+                                        partial_result.push(delta.clone());
+                                    }
+                                    StreamEvent::Finish(_) => {
+                                        *finished = true;
+                                    }
+                                    StreamEvent::Error(_) => {
+                                        *finished = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        unreachable!()
+                    }
+                }
+                result
             }
         }
 
@@ -151,9 +337,19 @@ mod durable_impl {
         }
 
         fn subscribe(&self) -> Pollable {
-            // TODO: how could we create a Pollable that can be "switched" to the new request when switching to live
-            // (some kind of lazy pollable - because during replay it does not have to be a real one as poll result are persisted)
-            self.stream.subscribe()
+            let mut state = self.state.borrow_mut();
+            match &mut *state {
+                Some(DurableChatStreamState::Live { stream, .. }) => stream.subscribe(),
+                Some(DurableChatStreamState::Replay { pollables, .. }) => {
+                    let lazy_pollable = LazyInitializedPollable::new();
+                    let pollable = lazy_pollable.subscribe();
+                    pollables.push(lazy_pollable);
+                    pollable
+                }
+                None => {
+                    unreachable!()
+                }
+            }
         }
     }
 
@@ -1073,6 +1269,34 @@ mod durable_impl {
 
         fn add_to_type_builder<T: TypeNodeBuilder>(builder: T) -> T::Result {
             builder.variant().unit_case("no-input").finish()
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct NoOutput;
+
+    impl IntoValue for NoOutput {
+        fn add_to_builder<T: NodeBuilder>(self, builder: T) -> T::Result {
+            builder.variant_unit(0)
+        }
+
+        fn add_to_type_builder<T: TypeNodeBuilder>(builder: T) -> T::Result {
+            builder.variant().unit_case("no-output").finish()
+        }
+    }
+
+    impl FromValueAndType for NoOutput {
+        fn from_extractor<'a, 'b>(
+            extractor: &'a impl WitValueExtractor<'a, 'b>,
+        ) -> Result<Self, String> {
+            let (idx, _inner) = extractor
+                .variant()
+                .ok_or_else(|| "NoOutput should be variant".to_string())?;
+            if idx == 0 {
+                Ok(NoOutput)
+            } else {
+                Err(format!("NoOutput should be variant 0, but got {idx}"))
+            }
         }
     }
 

@@ -1,9 +1,11 @@
 #[allow(static_mut_refs)]
 mod bindings;
 
-use crate::bindings::exports::test::openai_exports::test_openai_api::*;
+use golem_rust::atomically;
+use crate::bindings::exports::test::llm_exports::test_llm_api::*;
 use crate::bindings::golem::llm::llm;
 use crate::bindings::golem::llm::llm::StreamEvent;
+use crate::bindings::test::helper_client::test_helper_client::TestHelperApi;
 
 struct Component;
 
@@ -336,7 +338,77 @@ impl Guest for Component {
         println!("Response: {:?}", response);
     }
 
-    fn test6() {}
+    fn test6() -> String {
+        let config = llm::Config {
+            model: "gpt-3.5-turbo".to_string(),
+            temperature: Some(0.2),
+            max_tokens: None,
+            stop_sequences: None,
+            tools: vec![],
+            tool_choice: None,
+            provider_options: vec![],
+        };
+
+        println!("Starting streaming request to LLM...");
+        let stream = llm::stream(
+            &[llm::Message {
+                role: llm::Role::User,
+                name: Some("vigoo".to_string()),
+                content: vec![llm::ContentPart::Text(
+                    "What is the usual weather on the Vršič pass in the beginning of May?"
+                        .to_string(),
+                )],
+            }],
+            &config,
+        );
+
+        let mut result = String::new();
+
+        let name = std::env::var("GOLEM_WORKER_NAME").unwrap();
+        let mut round = 0;
+
+        loop {
+            let events = stream.blocking_get_next();
+            if events.is_empty() {
+                break;
+            }
+
+            for event in events {
+                println!("Received {event:?}");
+
+                match event {
+                    StreamEvent::Delta(delta) => {
+                        result.push_str(&format!("DELTA: {:?}\n", delta,));
+                    }
+                    StreamEvent::Finish(finish) => {
+                        result.push_str(&format!("FINISH: {:?}\n", finish,));
+                    }
+                    StreamEvent::Error(error) => {
+                        result.push_str(&format!(
+                            "ERROR: {:?} {} ({})\n",
+                            error.code,
+                            error.message,
+                            error.provider_error_json.unwrap_or_default()
+                        ));
+                    }
+                }
+            }
+
+            if round == 2 {
+                atomically(|| {
+                    let client = TestHelperApi::new(&name);
+                    let answer = client.blocking_inc_and_get();
+                    if answer == 1 {
+                        panic!("Simulating crash")
+                    }
+                });
+            }
+
+            round += 1;
+        }
+
+        result
+    }
 }
 
 bindings::export!(Component with_types_in bindings);

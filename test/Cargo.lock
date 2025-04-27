@@ -1348,7 +1348,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "test_anthropic"
+name = "test_helper"
 version = "0.0.1"
 dependencies = [
  "golem-rust",
@@ -1359,33 +1359,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "test_grok"
-version = "0.0.1"
-dependencies = [
- "golem-rust",
- "reqwest",
- "serde",
- "serde_json",
- "wit-bindgen-rt 0.40.0",
-]
-
-[[package]]
-name = "test_openai"
+name = "test_llm"
 version = "0.0.1"
 dependencies = [
  "golem-rust",
  "log",
- "reqwest",
- "serde",
- "serde_json",
- "wit-bindgen-rt 0.40.0",
-]
-
-[[package]]
-name = "test_openrouter"
-version = "0.0.1"
-dependencies = [
- "golem-rust",
  "reqwest",
  "serde",
  "serde_json",
