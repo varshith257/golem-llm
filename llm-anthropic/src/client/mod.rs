@@ -1,5 +1,8 @@
+use golem_llm::event_source;
+use golem_llm::event_source::EventSource;
 use golem_llm::golem::llm::llm::{Error, ErrorCode};
 use log::trace;
+use reqwest::header::HeaderValue;
 use reqwest::{Client, Method, Response, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -35,6 +38,28 @@ impl MessagesApi {
             .map_err(|err| from_reqwest_error("Request failed", err))?;
 
         parse_response(response)
+    }
+
+    pub fn stream_send_messages(&self, request: MessagesRequest) -> Result<EventSource, Error> {
+        trace!("Sending request to Anthropic API: {request:?}");
+
+        let response: Response = self
+            .client
+            .request(Method::POST, format!("{BASE_URL}/v1/messages"))
+            .header("anthropic-version", "2023-06-01")
+            .header("x-api-key", &self.api_key)
+            .header(
+                reqwest::header::ACCEPT,
+                HeaderValue::from_static("text/event-stream"),
+            )
+            .json(&request)
+            .send()
+            .map_err(|err| from_reqwest_error("Request failed", err))?;
+
+        trace!("Initializing SSE stream");
+
+        EventSource::new(response)
+            .map_err(|err| from_event_source_error("Failed to create SSE stream", err))
     }
 }
 
@@ -169,7 +194,7 @@ pub enum Tool {
         cache_control: Option<CacheControl>,
         #[serde(skip_serializing_if = "Option::is_none")]
         description: Option<String>,
-    }
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,7 +216,7 @@ pub enum StopReason {
     #[serde(rename = "stop_sequence")]
     StopSequence,
     #[serde(rename = "tool_use")]
-    ToolUse
+    ToolUse,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,7 +226,7 @@ pub struct Usage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_read_input_tokens: Option<u32>,
     pub input_tokens: u32,
-    pub output_tokens: u32
+    pub output_tokens: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,17 +239,36 @@ pub enum Role {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorResponse {
-    error: ErrorResponseDetails,
+    pub error: ErrorResponseDetails,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorResponseDetails {
-    message: String,
+    pub message: String,
     #[serde(rename = "type")]
-    typ: String,
+    pub typ: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ContentBlockDelta {
+    #[serde(rename = "text_delta")]
+    TextDelta { text: String },
+    #[serde(rename = "input_json_delta")]
+    InputJsonDelta { partial_json: String },
+}
+
+// TODO: to shared lib
 fn from_reqwest_error(details: impl AsRef<str>, err: reqwest::Error) -> Error {
+    Error {
+        code: ErrorCode::InternalError,
+        message: format!("{}: {err}", details.as_ref()),
+        provider_error_json: None,
+    }
+}
+
+// TODO: to shared lib
+fn from_event_source_error(details: impl AsRef<str>, err: event_source::error::Error) -> Error {
     Error {
         code: ErrorCode::InternalError,
         message: format!("{}: {err}", details.as_ref()),
@@ -257,6 +301,7 @@ fn parse_response<T: DeserializeOwned + Debug>(response: Response) -> Result<T, 
     }
 }
 
+// TODO: to shared lib
 fn error_code_from_status(status: StatusCode) -> ErrorCode {
     if status == StatusCode::TOO_MANY_REQUESTS {
         ErrorCode::RateLimitExceeded

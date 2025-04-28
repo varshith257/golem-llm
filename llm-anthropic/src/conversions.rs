@@ -188,7 +188,7 @@ pub fn tool_results_to_messages(
     messages
 }
 
-fn stop_reason_to_finish_reason(stop_reason: StopReason) -> FinishReason {
+pub fn stop_reason_to_finish_reason(stop_reason: StopReason) -> FinishReason {
     match stop_reason {
         StopReason::EndTurn => FinishReason::Other,
         StopReason::MaxTokens => FinishReason::Length,
@@ -197,7 +197,7 @@ fn stop_reason_to_finish_reason(stop_reason: StopReason) -> FinishReason {
     }
 }
 
-fn convert_usage(usage: crate::client::Usage) -> Usage {
+pub fn convert_usage(usage: crate::client::Usage) -> Usage {
     Usage {
         input_tokens: Some(usage.input_tokens),
         output_tokens: Some(usage.output_tokens),
