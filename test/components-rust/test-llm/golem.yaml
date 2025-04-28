@@ -11,7 +11,7 @@ components:
       # DEBUG PROFILES
       openai-debug:
         build:
-          - command: cargo component build
+          - command: cargo component build --no-default-features --features openai
             sources:
               - src
               - wit-generated
@@ -33,7 +33,7 @@ components:
 
       anthropic-debug:
         build:
-          - command: cargo component build
+          - command: cargo component build --no-default-features --features anthropic
             sources:
               - src
               - wit-generated
@@ -55,7 +55,7 @@ components:
 
       grok-debug:
         build:
-          - command: cargo component build
+          - command: cargo component build --no-default-features --features grok
             sources:
               - src
               - wit-generated
@@ -77,7 +77,7 @@ components:
 
       openrouter-debug:
         build:
-          - command: cargo component build
+          - command: cargo component build --no-default-features --features openrouter
             sources:
               - src
               - wit-generated
@@ -100,7 +100,7 @@ components:
       # RELEASE PROFILES
       openai-release:
         build:
-          - command: cargo component build --release
+          - command: cargo component build --release --no-default-features --features openai
             sources:
               - src
               - wit-generated
@@ -122,7 +122,7 @@ components:
 
       anthropic-release:
         build:
-          - command: cargo component build --release
+          - command: cargo component build --release --no-default-features --features anthropic
             sources:
               - src
               - wit-generated
@@ -144,7 +144,7 @@ components:
 
       grok-release:
         build:
-          - command: cargo component build --release
+          - command: cargo component build --release --no-default-features --features grok
             sources:
               - src
               - wit-generated
@@ -166,7 +166,7 @@ components:
 
       openrouter-release:
         build:
-          - command: cargo component build --release
+          - command: cargo component build --release --no-default-features --features openrouter
             sources:
               - src
               - wit-generated

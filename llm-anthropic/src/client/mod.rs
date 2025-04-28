@@ -28,6 +28,7 @@ impl MessagesApi {
         let response: Response = self
             .client
             .request(Method::POST, format!("{BASE_URL}/v1/messages"))
+            .header("anthropic-version", "2023-06-01")
             .header("x-api-key", &self.api_key)
             .json(&request)
             .send()
@@ -39,35 +40,36 @@ impl MessagesApi {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessagesRequest {
-    max_tokens: u32,
-    messages: Vec<Message>,
-    model: String,
-    metadata: Option<MessagesRequestMetadata>,
-    stop_sequences: Vec<String>,
-    stream: bool,
-    system: Vec<Content>, // can only be Text
+    pub max_tokens: u32,
+    pub messages: Vec<Message>,
+    pub model: String,
+    pub metadata: Option<MessagesRequestMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    temperature: Option<f32>,
+    pub stop_sequences: Option<Vec<String>>,
+    pub stream: bool,
+    pub system: Vec<Content>, // can only be Text
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
     // thinking
     #[serde(skip_serializing_if = "Option::is_none")]
-    tool_choice: Option<ToolChoice>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    tools: Vec<Tool>,
+    pub tool_choice: Option<ToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_k: Option<u32>,
+    pub tools: Option<Vec<Tool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_p: Option<f32>,
+    pub top_k: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessagesRequestMetadata {
-    user_id: Option<String>,
+    pub user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
-    content: Vec<Content>,
-    role: Role,
+    pub content: Vec<Content>,
+    pub role: Role,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,12 +174,12 @@ pub enum Tool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessagesResponse {
-    content: Vec<Content>, // can only be Text or ToolUse (or Thinking / RedactedThinking)
-    id: String,
-    model: String,
-    role: Role,
-    stop_reason: Option<StopReason>,
-    usage: Usage,
+    pub content: Vec<Content>, // can only be Text or ToolUse (or Thinking / RedactedThinking)
+    pub id: String,
+    pub model: String,
+    pub role: Role,
+    pub stop_reason: Option<StopReason>,
+    pub usage: Usage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,11 +197,11 @@ pub enum StopReason {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Usage {
     #[serde(skip_serializing_if = "Option::is_none")]
-    cache_creation_input_tokens: Option<u32>,
+    pub cache_creation_input_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    cache_read_input_tokens: Option<u32>,
-    input_tokens: u32,
-    output_tokens: u32
+    pub cache_read_input_tokens: Option<u32>,
+    pub input_tokens: u32,
+    pub output_tokens: u32
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

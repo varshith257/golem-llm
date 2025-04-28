@@ -1,5 +1,9 @@
 mod client;
+mod conversions;
 
+use crate::client::{MessagesApi, MessagesRequest};
+use crate::conversions::{messages_to_request, process_response, tool_results_to_messages};
+use golem_llm::config::with_config_key;
 use golem_llm::durability::{DurableLLM, ExtendedGuest};
 use golem_llm::golem::llm::llm::{
     ChatEvent, ChatStream, Config, Error, Guest, GuestChatStream, Message, Pollable, StreamEvent,
@@ -27,6 +31,13 @@ struct AnthropicComponent;
 
 impl AnthropicComponent {
     const ENV_VAR_NAME: &'static str = "ANTHROPIC_API_KEY";
+
+    fn request(client: MessagesApi, request: MessagesRequest) -> ChatEvent {
+        match client.send_messages(request) {
+            Ok(response) => process_response(response),
+            Err(err) => ChatEvent::Error(err),
+        }
+    }
 }
 
 impl Guest for AnthropicComponent {
@@ -35,7 +46,14 @@ impl Guest for AnthropicComponent {
     fn send(messages: Vec<Message>, config: Config) -> ChatEvent {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
-        todo!()
+        with_config_key(Self::ENV_VAR_NAME, ChatEvent::Error, |anthropic_api_key| {
+            let client = MessagesApi::new(anthropic_api_key);
+
+            match messages_to_request(messages, config) {
+                Ok(request) => Self::request(client, request),
+                Err(err) => return ChatEvent::Error(err),
+            }
+        })
     }
 
     fn continue_(
@@ -45,7 +63,17 @@ impl Guest for AnthropicComponent {
     ) -> ChatEvent {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
-        todo!()
+        with_config_key(Self::ENV_VAR_NAME, ChatEvent::Error, |anthropic_api_key| {
+            let client = MessagesApi::new(anthropic_api_key);
+
+            match messages_to_request(messages, config) {
+                Ok(mut request) => {
+                    request.messages.extend(tool_results_to_messages(tool_results));
+                    Self::request(client, request)
+                },
+                Err(err) => return ChatEvent::Error(err),
+            }
+        })
     }
 
     fn stream(messages: Vec<Message>, config: Config) -> ChatStream {
@@ -56,7 +84,7 @@ impl Guest for AnthropicComponent {
 impl ExtendedGuest for AnthropicComponent {
     fn unwrapped_stream(messages: Vec<Message>, config: Config) -> AnthropicChatStream {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
-        
+
         todo!()
     }
 }

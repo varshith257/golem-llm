@@ -9,10 +9,28 @@ use crate::bindings::test::helper_client::test_helper_client::TestHelperApi;
 
 struct Component;
 
+#[cfg(feature = "openai")]
+const MODEL: &'static str = "gpt-3.5-turbo";
+#[cfg(feature = "anthropic")]
+const MODEL: &'static str = "claude-3-7-sonnet-20250219";
+#[cfg(feature = "grok")]
+const MODEL: &'static str = "gpt-3.5-turbo"; // TODO
+#[cfg(feature = "openrouter")]
+const MODEL: &'static str = "gpt-3.5-turbo"; // TODO
+
+#[cfg(feature = "openai")]
+const IMAGE_MODEL: &'static str = "gpt-4o-mini";
+#[cfg(feature = "anthropic")]
+const IMAGE_MODEL: &'static str = "claude-3-7-sonnet-20250219";
+#[cfg(feature = "grok")]
+const IMAGE_MODEL: &'static str = "gpt-4o-mini"; // TODO
+#[cfg(feature = "openrouter")]
+const IMAGE_MODEL: &'static str = "gpt-4o-mini"; // TODO
+
 impl Guest for Component {
     fn test1() -> String {
         let config = llm::Config {
-            model: "gpt-3.5-turbo".to_string(),
+            model: MODEL.to_string(),
             temperature: Some(0.2),
             max_tokens: None,
             stop_sequences: None,
@@ -65,7 +83,7 @@ impl Guest for Component {
 
     fn test2() -> String {
         let config = llm::Config {
-            model: "gpt-3.5-turbo".to_string(),
+            model: MODEL.to_string(),
             temperature: Some(0.2),
             max_tokens: None,
             stop_sequences: None,
@@ -107,66 +125,74 @@ impl Guest for Component {
             }],
             &config,
         );
-        match response1 {
+        let tool_request = match response1 {
             llm::ChatEvent::Message(msg) => {
-                format!("Message 1: {:?}", msg)
+                println!("Message 1: {:?}", msg);
+                msg.tool_calls
             }
             llm::ChatEvent::ToolRequest(request) => {
                 println!("Tool request: {:?}", request);
-                let mut calls = Vec::new();
-                for call in request {
-                    calls.push((
-                        call.clone(),
-                        llm::ToolResult::Success(llm::ToolSuccess {
-                            id: call.id,
-                            name: call.name,
-                            result_json: r#"{ value: 6 }"#.to_string(),
-                            execution_time_ms: None,
-                        }),
-                    ));
-                }
-
-                let response2 = llm::continue_(
-                    &[llm::Message {
-                        role: llm::Role::User,
-                        name: Some("vigoo".to_string()),
-                        content: input.clone(),
-                    }],
-                    &calls,
-                    &config,
-                );
-
-                match response2 {
-                    llm::ChatEvent::Message(msg) => {
-                        format!("Message 2: {:?}", msg)
-                    }
-                    llm::ChatEvent::ToolRequest(request) => {
-                        format!("Tool request 2: {:?}", request)
-                    }
-                    llm::ChatEvent::Error(error) => {
-                        format!(
-                            "ERROR 2: {:?} {} ({})",
-                            error.code,
-                            error.message,
-                            error.provider_error_json.unwrap_or_default()
-                        )
-                    }
-                }
+                request
             }
             llm::ChatEvent::Error(error) => {
-                format!(
+                println!(
                     "ERROR 1: {:?} {} ({})",
                     error.code,
                     error.message,
                     error.provider_error_json.unwrap_or_default()
-                )
+                );
+                vec![]
             }
+        };
+        
+        if !tool_request.is_empty() {
+            let mut calls = Vec::new();
+            for call in tool_request {
+                calls.push((
+                    call.clone(),
+                    llm::ToolResult::Success(llm::ToolSuccess {
+                        id: call.id,
+                        name: call.name,
+                        result_json: r#"{ value: 6 }"#.to_string(),
+                        execution_time_ms: None,
+                    }),
+                ));
+            }
+
+            let response2 = llm::continue_(
+                &[llm::Message {
+                    role: llm::Role::User,
+                    name: Some("vigoo".to_string()),
+                    content: input.clone(),
+                }],
+                &calls,
+                &config,
+            );
+
+            match response2 {
+                llm::ChatEvent::Message(msg) => {
+                    format!("Message 2: {:?}", msg)
+                }
+                llm::ChatEvent::ToolRequest(request) => {
+                    format!("Tool request 2: {:?}", request)
+                }
+                llm::ChatEvent::Error(error) => {
+                    format!(
+                        "ERROR 2: {:?} {} ({})",
+                        error.code,
+                        error.message,
+                        error.provider_error_json.unwrap_or_default()
+                    )
+                }
+            }
+        } else {
+            "No tool request".to_string()
         }
     }
 
     fn test3() -> String {
         let config = llm::Config {
-            model: "gpt-3.5-turbo".to_string(),
+            model: MODEL.to_string(),
             temperature: Some(0.2),
             max_tokens: None,
             stop_sequences: None,
@@ -223,7 +249,7 @@ impl Guest for Component {
 
     fn test4() -> String {
         let config = llm::Config {
-            model: "gpt-3.5-turbo".to_string(),
+            model: MODEL.to_string(),
             temperature: Some(0.2),
             max_tokens: None,
             stop_sequences: None,
@@ -301,7 +327,7 @@ impl Guest for Component {
 
     fn test5() {
         let config = llm::Config {
-            model: "gpt-4o-mini".to_string(),
+            model: IMAGE_MODEL.to_string(),
             temperature: None,
             max_tokens: None,
             stop_sequences: None,
@@ -340,7 +366,7 @@ impl Guest for Component {
 
     fn test6() -> String {
         let config = llm::Config {
-            model: "gpt-3.5-turbo".to_string(),
+            model: MODEL.to_string(),
             temperature: Some(0.2),
             max_tokens: None,
             stop_sequences: None,
