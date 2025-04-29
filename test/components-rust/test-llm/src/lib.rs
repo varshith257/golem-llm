@@ -16,7 +16,7 @@ const MODEL: &'static str = "claude-3-7-sonnet-20250219";
 #[cfg(feature = "grok")]
 const MODEL: &'static str = "grok-3-beta";
 #[cfg(feature = "openrouter")]
-const MODEL: &'static str = "gpt-3.5-turbo"; // TODO
+const MODEL: &'static str = "openrouter/auto";
 
 #[cfg(feature = "openai")]
 const IMAGE_MODEL: &'static str = "gpt-4o-mini";
@@ -25,7 +25,7 @@ const IMAGE_MODEL: &'static str = "claude-3-7-sonnet-20250219";
 #[cfg(feature = "grok")]
 const IMAGE_MODEL: &'static str = "grok-2-vision-latest";
 #[cfg(feature = "openrouter")]
-const IMAGE_MODEL: &'static str = "gpt-4o-mini"; // TODO
+const IMAGE_MODEL: &'static str = "openrouter/auto";
 
 impl Guest for Component {
     fn test1() -> String {

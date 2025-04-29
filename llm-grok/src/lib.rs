@@ -218,8 +218,8 @@ impl Guest for GrokComponent {
     fn send(messages: Vec<Message>, config: Config) -> ChatEvent {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
-        with_config_key(Self::ENV_VAR_NAME, ChatEvent::Error, |anthropic_api_key| {
-            let client = CompletionsApi::new(anthropic_api_key);
+        with_config_key(Self::ENV_VAR_NAME, ChatEvent::Error, |xai_api_key| {
+            let client = CompletionsApi::new(xai_api_key);
 
             match messages_to_request(messages, config) {
                 Ok(request) => Self::request(client, request),
@@ -235,8 +235,8 @@ impl Guest for GrokComponent {
     ) -> ChatEvent {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
-        with_config_key(Self::ENV_VAR_NAME, ChatEvent::Error, |anthropic_api_key| {
-            let client = CompletionsApi::new(anthropic_api_key);
+        with_config_key(Self::ENV_VAR_NAME, ChatEvent::Error, |xai_api_key| {
+            let client = CompletionsApi::new(xai_api_key);
 
             match messages_to_request(messages, config) {
                 Ok(mut request) => {
@@ -259,18 +259,14 @@ impl ExtendedGuest for GrokComponent {
     fn unwrapped_stream(messages: Vec<Message>, config: Config) -> GrokChatStream {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
-        with_config_key(
-            Self::ENV_VAR_NAME,
-            GrokChatStream::failed,
-            |anthropic_api_key| {
-                let client = CompletionsApi::new(anthropic_api_key);
+        with_config_key(Self::ENV_VAR_NAME, GrokChatStream::failed, |xai_api_key| {
+            let client = CompletionsApi::new(xai_api_key);
 
-                match messages_to_request(messages, config) {
-                    Ok(request) => Self::streaming_request(client, request),
-                    Err(err) => GrokChatStream::failed(err),
-                }
-            },
-        )
+            match messages_to_request(messages, config) {
+                Ok(request) => Self::streaming_request(client, request),
+                Err(err) => GrokChatStream::failed(err),
+            }
+        })
     }
 }
 

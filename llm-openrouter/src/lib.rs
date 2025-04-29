@@ -1,31 +1,338 @@
-use golem_llm::golem::llm::llm::{
-    ChatEvent, ChatStream, Config, Error, Guest, GuestChatStream, Message, Pollable, StreamEvent,
-    ToolCall, ToolResult,
-};
+mod client;
+mod conversions;
 
-struct OpenRouterChatStream;
+use crate::client::{
+    error_code_from_status, ChatCompletionChunk, CompletionsApi, CompletionsRequest, FunctionCall,
+};
+use crate::conversions::{
+    convert_finish_reason, convert_usage, messages_to_request, process_response,
+    tool_results_to_messages,
+};
+use golem_llm::config::with_config_key;
+use golem_llm::durability::{DurableLLM, ExtendedGuest};
+use golem_llm::event_source::{Event, EventSource, MessageEvent};
+use golem_llm::golem::llm::llm::{
+    ChatEvent, ChatStream, Config, ContentPart, Error, ErrorCode, FinishReason, Guest,
+    GuestChatStream, Message, Pollable, ResponseMetadata, StreamDelta, StreamEvent, ToolCall,
+    ToolResult,
+};
+use golem_llm::LOGGING_STATE;
+use log::trace;
+use reqwest::StatusCode;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::task::Poll;
+
+#[derive(Default)]
+struct JsonFragment {
+    id: String,
+    name: String,
+    json: String,
+}
+
+struct OpenRouterChatStream {
+    stream: RefCell<Option<EventSource>>,
+    failure: Option<Error>,
+    finished: RefCell<bool>,
+    finish_reason: RefCell<Option<FinishReason>>,
+    json_fragments: RefCell<HashMap<u32, JsonFragment>>,
+}
+
+impl OpenRouterChatStream {
+    pub fn new(stream: EventSource) -> Self {
+        OpenRouterChatStream {
+            stream: RefCell::new(Some(stream)),
+            failure: None,
+            finished: RefCell::new(false),
+            finish_reason: RefCell::new(None),
+            json_fragments: RefCell::new(HashMap::new()),
+        }
+    }
+
+    pub fn failed(error: Error) -> Self {
+        OpenRouterChatStream {
+            stream: RefCell::new(None),
+            failure: Some(error),
+            finished: RefCell::new(false),
+            finish_reason: RefCell::new(None),
+            json_fragments: RefCell::new(HashMap::new()),
+        }
+    }
+
+    fn decode_message(&self, raw: &str) -> Result<Option<StreamEvent>, String> {
+        trace!("Received raw stream event: {raw}");
+        if raw.starts_with(": ") {
+            Ok(None) // comment
+        } else {
+            let json: serde_json::Value = serde_json::from_str(raw)
+                .map_err(|err| format!("Failed to deserialize stream event: {err}"))?;
+
+            let typ = json
+                .as_object()
+                .and_then(|obj| obj.get("object"))
+                .and_then(|v| v.as_str());
+            match typ {
+                Some("chat.completion.chunk") => {
+                    let message: ChatCompletionChunk = serde_json::from_value(json)
+                        .map_err(|err| format!("Failed to parse stream event: {err}"))?;
+                    if let Some(usage) = message.usage {
+                        let finish_reason = self.finish_reason.borrow();
+                        Ok(Some(StreamEvent::Finish(ResponseMetadata {
+                            finish_reason: finish_reason.clone(),
+                            usage: Some(convert_usage(&usage)),
+                            provider_id: None,
+                            timestamp: Some(message.created.to_string()),
+                            provider_metadata_json: None,
+                        })))
+                    } else if let Some(choice) = message.choices.into_iter().next() {
+                        if let Some(finish_reason) = choice.finish_reason {
+                            *self.finish_reason.borrow_mut() =
+                                Some(convert_finish_reason(&finish_reason));
+                        }
+                        if let Some(error) = choice.error {
+                            Ok(Some(StreamEvent::Error(Error {
+                                code: error_code_from_status(
+                                    TryInto::<u16>::try_into(error.code)
+                                        .ok()
+                                        .and_then(|code| StatusCode::from_u16(code).ok())
+                                        .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                                ),
+                                message: error.message,
+                                provider_error_json: error
+                                    .metadata
+                                    .map(|value| serde_json::to_string(&value).unwrap()),
+                            })))
+                        } else {
+                            let content = choice
+                                .delta
+                                .content
+                                .map(|text| vec![ContentPart::Text(text)]);
+
+                            let mut seen_indices = HashSet::new();
+                            let mut tool_calls = Vec::new();
+                            let mut json_fragments = self.json_fragments.borrow_mut();
+
+                            for tool_call in choice.delta.tool_calls.unwrap_or_default() {
+                                match tool_call {
+                                    client::ToolCall::Function {
+                                        id: Some(id),
+                                        function:
+                                            FunctionCall {
+                                                name: Some(name),
+                                                arguments,
+                                            },
+                                        index: None,
+                                    } => {
+                                        // Full tool call
+                                        tool_calls.push(ToolCall {
+                                            id,
+                                            name,
+                                            arguments_json: arguments,
+                                        });
+                                    }
+                                    client::ToolCall::Function {
+                                        id: Some(id),
+                                        function:
+                                            FunctionCall {
+                                                name: Some(name),
+                                                arguments,
+                                            },
+                                        index: Some(index),
+                                    } => {
+                                        // Beginning of a streamed tool call
+                                        json_fragments.insert(
+                                            index,
+                                            JsonFragment {
+                                                id,
+                                                name,
+                                                json: arguments,
+                                            },
+                                        );
+                                        seen_indices.insert(index);
+                                    }
+                                    client::ToolCall::Function {
+                                        id: _,
+                                        function: FunctionCall { name: _, arguments },
+                                        index: Some(index),
+                                    } => {
+                                        // Fragment
+                                        let fragment = json_fragments.entry(index).or_default();
+                                        fragment.json.push_str(&arguments);
+                                        seen_indices.insert(index);
+                                    }
+                                    _ => {
+                                        return Err(format!(
+                                            "Unexpected tool call format: {tool_call:?}"
+                                        ));
+                                    }
+                                }
+                            }
+
+                            let indices =
+                                json_fragments.keys().copied().collect::<Vec<_>>().clone();
+                            for index in indices {
+                                if !seen_indices.contains(&index) {
+                                    // Emitting finished tool call
+                                    let fragment = json_fragments.remove(&index).unwrap();
+                                    tool_calls.push(ToolCall {
+                                        id: fragment.id,
+                                        name: fragment.name,
+                                        arguments_json: fragment.json,
+                                    });
+                                }
+                            }
+
+                            Ok(Some(StreamEvent::Delta(StreamDelta {
+                                content,
+                                tool_calls: if tool_calls.is_empty() {
+                                    None
+                                } else {
+                                    Some(tool_calls)
+                                },
+                            })))
+                        }
+                    } else {
+                        Ok(None)
+                    }
+                }
+                Some(_) => Ok(None),
+                None => {
+                    Err("Unexpected stream event format, does not have 'object' field".to_string())
+                }
+            }
+        }
+    }
+}
 
 impl GuestChatStream for OpenRouterChatStream {
     fn get_next(&self) -> Option<Vec<StreamEvent>> {
-        todo!()
+        if *self.finished.borrow() {
+            return Some(vec![]);
+        }
+
+        let mut stream = self.stream.borrow_mut();
+        if let Some(stream) = stream.as_mut() {
+            match stream.poll_next() {
+                Poll::Ready(None) => {
+                    *self.finished.borrow_mut() = true;
+                    Some(vec![])
+                }
+                Poll::Ready(Some(Err(golem_llm::event_source::error::Error::StreamEnded))) => {
+                    *self.finished.borrow_mut() = true;
+                    Some(vec![])
+                }
+                Poll::Ready(Some(Err(error))) => Some(vec![StreamEvent::Error(Error {
+                    code: ErrorCode::InternalError,
+                    message: error.to_string(),
+                    provider_error_json: None,
+                })]),
+                Poll::Ready(Some(Ok(event))) => {
+                    let mut events = vec![];
+
+                    match event {
+                        Event::Open => {}
+                        Event::Message(MessageEvent { data, .. }) => {
+                            if data != "[DONE]" {
+                                match self.decode_message(&data) {
+                                    Ok(Some(stream_event)) => {
+                                        if matches!(stream_event, StreamEvent::Finish(_)) {
+                                            *self.finished.borrow_mut() = true;
+                                        }
+                                        events.push(stream_event);
+                                    }
+                                    Ok(None) => {
+                                        // Ignored event
+                                    }
+                                    Err(error) => {
+                                        events.push(StreamEvent::Error(Error {
+                                            code: ErrorCode::InternalError,
+                                            message: error,
+                                            provider_error_json: None,
+                                        }));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if events.is_empty() {
+                        None
+                    } else {
+                        Some(events)
+                    }
+                }
+                Poll::Pending => None,
+            }
+        } else if let Some(error) = self.failure.clone() {
+            *self.finished.borrow_mut() = true;
+            Some(vec![StreamEvent::Error(error)])
+        } else {
+            None
+        }
     }
 
     fn blocking_get_next(&self) -> Vec<StreamEvent> {
-        todo!()
+        let pollable = self.subscribe();
+        let mut result = Vec::new();
+        loop {
+            pollable.block();
+            match self.get_next() {
+                Some(events) => {
+                    result.extend(events);
+                    break result;
+                }
+                None => continue,
+            }
+        }
     }
 
     fn subscribe(&self) -> Pollable {
-        todo!()
+        if let Some(stream) = self.stream.borrow().as_ref() {
+            stream.subscribe()
+        } else {
+            golem_rust::bindings::wasi::clocks::monotonic_clock::subscribe_duration(0)
+        }
     }
 }
 
 struct OpenRouterComponent;
 
+impl OpenRouterComponent {
+    const ENV_VAR_NAME: &'static str = "OPENROUTER_API_KEY";
+
+    fn request(client: CompletionsApi, request: CompletionsRequest) -> ChatEvent {
+        match client.send_messages(request) {
+            Ok(response) => process_response(response),
+            Err(err) => ChatEvent::Error(err),
+        }
+    }
+
+    fn streaming_request(
+        client: CompletionsApi,
+        mut request: CompletionsRequest,
+    ) -> OpenRouterChatStream {
+        request.stream = Some(true);
+        match client.stream_send_messages(request) {
+            Ok(stream) => OpenRouterChatStream::new(stream),
+            Err(err) => OpenRouterChatStream::failed(err),
+        }
+    }
+}
+
 impl Guest for OpenRouterComponent {
     type ChatStream = OpenRouterChatStream;
 
     fn send(messages: Vec<Message>, config: Config) -> ChatEvent {
-        todo!()
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
+
+        with_config_key(Self::ENV_VAR_NAME, ChatEvent::Error, |openrouter_api_key| {
+            let client = CompletionsApi::new(openrouter_api_key);
+
+            match messages_to_request(messages, config) {
+                Ok(request) => Self::request(client, request),
+                Err(err) => return ChatEvent::Error(err),
+            }
+        })
     }
 
     fn continue_(
@@ -33,12 +340,47 @@ impl Guest for OpenRouterComponent {
         tool_results: Vec<(ToolCall, ToolResult)>,
         config: Config,
     ) -> ChatEvent {
-        todo!()
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
+
+        with_config_key(Self::ENV_VAR_NAME, ChatEvent::Error, |openrouter_api_key| {
+            let client = CompletionsApi::new(openrouter_api_key);
+
+            match messages_to_request(messages, config) {
+                Ok(mut request) => {
+                    request
+                        .messages
+                        .extend(tool_results_to_messages(tool_results));
+                    Self::request(client, request)
+                }
+                Err(err) => return ChatEvent::Error(err),
+            }
+        })
     }
 
     fn stream(messages: Vec<Message>, config: Config) -> ChatStream {
-        todo!()
+        ChatStream::new(Self::unwrapped_stream(messages, config))
     }
 }
 
-golem_llm::export_llm!(OpenRouterComponent with_types_in golem_llm);
+impl ExtendedGuest for OpenRouterComponent {
+    fn unwrapped_stream(messages: Vec<Message>, config: Config) -> OpenRouterChatStream {
+        LOGGING_STATE.with_borrow_mut(|state| state.init());
+
+        with_config_key(
+            Self::ENV_VAR_NAME,
+            OpenRouterChatStream::failed,
+            |openrouter_api_key| {
+                let client = CompletionsApi::new(openrouter_api_key);
+
+                match messages_to_request(messages, config) {
+                    Ok(request) => Self::streaming_request(client, request),
+                    Err(err) => OpenRouterChatStream::failed(err),
+                }
+            },
+        )
+    }
+}
+
+type DurableOpenRouterComponent = DurableLLM<OpenRouterComponent>;
+
+golem_llm::export_llm!(DurableOpenRouterComponent with_types_in golem_llm);

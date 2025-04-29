@@ -124,9 +124,7 @@ pub enum OutputItem {
 #[serde(tag = "type")]
 pub enum OutputMessageContent {
     #[serde(rename = "output_text")]
-    Text {
-        text: String,
-    },
+    Text { text: String },
     #[serde(rename = "refusal")]
     Refusal { refusal: String },
 }
