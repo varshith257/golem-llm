@@ -404,14 +404,23 @@ impl Guest for Component {
 
                 match event {
                     StreamEvent::Delta(delta) => {
-                        result.push_str(&format!("DELTA: {:?}\n", delta,));
+                        for content in delta.content.unwrap_or_default() {
+                            match content {
+                                llm::ContentPart::Text(txt) => {
+                                    result.push_str(&txt);
+                                }
+                                llm::ContentPart::Image(img) => {
+                                    result.push_str(&format!("IMAGE: {} ({:?})\n", img.url, img.detail));
+                                }
+                            }
+                        }
                     }
                     StreamEvent::Finish(finish) => {
-                        result.push_str(&format!("FINISH: {:?}\n", finish,));
+                        result.push_str(&format!("\nFINISH: {:?}\n", finish,));
                     }
                     StreamEvent::Error(error) => {
                         result.push_str(&format!(
-                            "ERROR: {:?} {} ({})\n",
+                            "\nERROR: {:?} {} ({})\n",
                             error.code,
                             error.message,
                             error.provider_error_json.unwrap_or_default()

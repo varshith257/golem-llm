@@ -27,7 +27,6 @@ impl CompletionsApi {
 
     pub fn send_messages(&self, request: CompletionsRequest) -> Result<CompletionsResponse, Error> {
         trace!("Sending request to xAI API: {request:?}");
-        trace!("xAI request JSON: {}", serde_json::to_string(&request).unwrap());
 
         let response: Response = self
             .client
@@ -42,7 +41,6 @@ impl CompletionsApi {
 
     pub fn stream_send_messages(&self, request: CompletionsRequest) -> Result<EventSource, Error> {
         trace!("Sending request to xAI API: {request:?}");
-        trace!("xAI request JSON: {}", serde_json::to_string(&request).unwrap());
 
         let response: Response = self
             .client
@@ -81,7 +79,10 @@ pub struct CompletionsRequest {
     pub seed: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_options: Option<StreamOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -94,6 +95,11 @@ pub struct CompletionsRequest {
     pub top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamOptions {
+    pub include_usage: bool
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -282,6 +288,30 @@ pub struct PromptTokenDetails {
     pub cached_tokens: u32,
     pub image_tokens: u32,
     pub text_tokens: u32
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatCompletionChunk {
+    pub id: String,
+    pub created: u64,
+    pub model: String,
+    pub choices: Vec<ChoiceChunk>,
+    pub usage: Option<Usage>,
+    pub system_fingerprint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChoiceChunk {
+    pub index: u32,
+    pub delta: ChoiceDelta,
+    pub finish_reason: Option<FinishReason>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChoiceDelta {
+    pub content: Option<String>,
+    pub tool_calls: Option<Vec<ToolCall>>,
+    pub role: String,
 }
 
 // TODO: to shared lib

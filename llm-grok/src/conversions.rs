@@ -65,6 +65,7 @@ pub fn messages_to_request(
             .and_then(|seed_s| seed_s.parse::<u32>().ok()),
         stop: config.stop_sequences,
         stream: Some(false),
+        stream_options: None,
         temperature: config.temperature,
         tool_choice: config.tool_choice,
         tools,
@@ -90,15 +91,7 @@ pub fn process_response(response: CompletionsResponse) -> ChatEvent {
 
         let empty = Vec::new();
         for tool_call in choice.message.tool_calls.as_ref().unwrap_or(&empty) {
-            match tool_call {
-                crate::client::ToolCall::Function { function, id, .. } => {
-                    tool_calls.push(ToolCall {
-                        id: id.clone(),
-                        name: function.name.clone(),
-                        arguments_json: function.arguments.clone(),
-                    })
-                }
-            }
+            tool_calls.push(convert_tool_call(tool_call));
         }
 
         if contents.is_empty() {
@@ -126,32 +119,6 @@ pub fn process_response(response: CompletionsResponse) -> ChatEvent {
             provider_error_json: None,
         })
     }
-    // for content in choice.message.content {
-    //     match content {
-    //         Content::Text { text, .. } => contents.push(ContentPart::Text(text)),
-    //         Content::Image { source, .. } => match source {
-    //             ImageSource::Url { url } => {
-    //                 contents.push(ContentPart::Image(ImageUrl { url, detail: None }))
-    //             }
-    //             ImageSource::Base64 { .. } => {
-    //                 return ChatEvent::Error(Error {
-    //                     code: ErrorCode::Unsupported,
-    //                     message: "Base64 response images are not supported".to_string(),
-    //                     provider_error_json: None,
-    //                 })
-    //             }
-    //         },
-    //         Content::ToolUse {
-    //             id, input, name, ..
-    //         } => tool_calls.push(ToolCall {
-    //             id,
-    //             name,
-    //             arguments_json: serde_json::to_string(&input).unwrap(),
-    //         }),
-    //         Content::ToolResult { .. } => {}
-    //     }
-    // }
-    //
 }
 
 pub fn tool_results_to_messages(
@@ -188,6 +155,16 @@ pub fn tool_results_to_messages(
     messages
 }
 
+pub fn convert_tool_call(tool_call: &crate::client::ToolCall) -> ToolCall {
+    match tool_call {
+        crate::client::ToolCall::Function { function, id, .. } => ToolCall {
+            id: id.clone(),
+            name: function.name.clone(),
+            arguments_json: function.arguments.clone(),
+        },
+    }
+}
+
 fn convert_content_parts(contents: Vec<ContentPart>) -> crate::client::Content {
     let mut result = Vec::new();
     for content in contents {
@@ -214,7 +191,7 @@ impl From<ImageDetail> for Detail {
     }
 }
 
-fn convert_finish_reason(value: &crate::client::FinishReason) -> FinishReason {
+pub fn convert_finish_reason(value: &crate::client::FinishReason) -> FinishReason {
     match value {
         crate::client::FinishReason::Stop => FinishReason::Stop,
         crate::client::FinishReason::Length => FinishReason::Length,
@@ -223,7 +200,7 @@ fn convert_finish_reason(value: &crate::client::FinishReason) -> FinishReason {
     }
 }
 
-fn convert_usage(value: &crate::client::Usage) -> Usage {
+pub fn convert_usage(value: &crate::client::Usage) -> Usage {
     Usage {
         input_tokens: Some(value.prompt_tokens),
         output_tokens: Some(value.completion_tokens),
