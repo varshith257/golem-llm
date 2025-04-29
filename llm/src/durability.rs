@@ -1,4 +1,4 @@
-use crate::golem::llm::llm::{Config, Guest, Message};
+use crate::golem::llm::llm::{Config, ContentPart, Guest, Message, Role, StreamDelta};
 use std::marker::PhantomData;
 
 pub struct DurableLLM<Impl> {
@@ -7,6 +7,49 @@ pub struct DurableLLM<Impl> {
 
 pub trait ExtendedGuest: Guest + 'static {
     fn unwrapped_stream(messages: Vec<Message>, config: Config) -> Self::ChatStream;
+
+    fn retry_prompt(original_messages: &[Message], partial_result: &[StreamDelta]) -> Vec<Message> {
+        let mut extended_messages = Vec::new();
+        extended_messages.push(Message {
+            role: Role::System,
+            name: None,
+            content: vec![
+                ContentPart::Text(
+                    "You were asked the same question previously, but the response was interrupted before completion. \
+                                        Please continue your response from where you left off. \
+                                        Do not include the part of the response that was already seen.".to_string()),
+                ContentPart::Text("Here is the original question:".to_string()),
+            ],
+        });
+        extended_messages.extend_from_slice(original_messages);
+
+        let mut partial_result_as_content = Vec::new();
+        for delta in partial_result {
+            if let Some(contents) = &delta.content {
+                partial_result_as_content.extend_from_slice(contents);
+            }
+            if let Some(tool_calls) = &delta.tool_calls {
+                for tool_call in tool_calls {
+                    partial_result_as_content.push(ContentPart::Text(format!(
+                        "<tool-call id=\"{}\" name=\"{}\" arguments=\"{}\"/>",
+                        tool_call.id, tool_call.name, tool_call.arguments_json,
+                    )));
+                }
+            }
+        }
+
+        extended_messages.push(Message {
+            role: Role::System,
+            name: None,
+            content: vec![ContentPart::Text(
+                "Here is the partial response that was successfully received:".to_string(),
+            )]
+            .into_iter()
+            .chain(partial_result_as_content)
+            .collect(),
+        });
+        extended_messages
+    }
 }
 
 #[cfg(not(feature = "durability"))]
@@ -208,46 +251,8 @@ mod durable_impl {
                         if *finished {
                             (None, None)
                         } else {
-                            let mut extended_messages = Vec::new();
-                            extended_messages.push(Message {
-                                role: Role::System,
-                                name: None,
-                                content: vec![
-                                    ContentPart::Text(
-                                        "You were asked the same question previously, but the response was interrupted before completion. \
-                                        Please continue your response from where you left off. \
-                                        Do not include the part of the response that was already seen.".to_string()),
-                                    ContentPart::Text("Here is the original question:".to_string()),
-                                ],
-                            });
-                            extended_messages.extend_from_slice(original_messages);
-
-                            let mut partial_result_as_content = Vec::new();
-                            for delta in partial_result {
-                                if let Some(contents) = &delta.content {
-                                    partial_result_as_content.extend_from_slice(contents);
-                                }
-                                if let Some(tool_calls) = &delta.tool_calls {
-                                    for tool_call in tool_calls {
-                                        partial_result_as_content.push(ContentPart::Text(format!(
-                                            "<tool-call id=\"{}\" name=\"{}\" arguments=\"{}\"/>",
-                                            tool_call.id, tool_call.name, tool_call.arguments_json,
-                                        )));
-                                    }
-                                }
-                            }
-
-                            extended_messages.push(Message {
-                                role: Role::System,
-                                name: None,
-                                content: vec![ContentPart::Text(
-                                    "Here is the partial response that was successfully received:"
-                                        .to_string(),
-                                )]
-                                .into_iter()
-                                .chain(partial_result_as_content)
-                                .collect(),
-                            });
+                            let extended_messages =
+                                Impl::retry_prompt(&original_messages, &partial_result);
 
                             let (stream, first_live_result) =
                                 with_persistence_level(PersistenceLevel::PersistNothing, || {

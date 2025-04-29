@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::str::FromStr;
 use reqwest::{Client, Method, Response, StatusCode};
 use reqwest::header::HeaderValue;
 use serde::de::DeserializeOwned;
@@ -25,7 +26,8 @@ impl CompletionsApi {
     }
 
     pub fn send_messages(&self, request: CompletionsRequest) -> Result<CompletionsResponse, Error> {
-        trace!("Sending request to XAI API: {request:?}");
+        trace!("Sending request to xAI API: {request:?}");
+        trace!("xAI request JSON: {}", serde_json::to_string(&request).unwrap());
 
         let response: Response = self
             .client
@@ -39,7 +41,8 @@ impl CompletionsApi {
     }
 
     pub fn stream_send_messages(&self, request: CompletionsRequest) -> Result<EventSource, Error> {
-        trace!("Sending request to XAI API: {request:?}");
+        trace!("Sending request to xAI API: {request:?}");
+        trace!("xAI request JSON: {}", serde_json::to_string(&request).unwrap());
 
         let response: Response = self
             .client
@@ -86,11 +89,11 @@ pub struct CompletionsRequest {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<Tool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_logprobs: Option<u8>,
+    pub top_logprobs: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_p: Option<f32>,
+    pub top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    user: Option<String>,
+    pub user: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,11 +107,11 @@ pub enum Tool {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Function {
-    name: String,
+    pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    description: Option<String>,
+    pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    parameters: Option<serde_json::Value>,
+    pub parameters: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,24 +119,31 @@ pub struct Function {
 pub enum Message {
     #[serde(rename = "system")]
     System {
-        content: Vec<ContentPart>,
+        content: Content,
+        #[serde(skip_serializing_if = "Option::is_none")]
         name: Option<String>
     },
     #[serde(rename = "user")]
     User {
-        content: Vec<ContentPart>,
+        content: Content,
+        #[serde(skip_serializing_if = "Option::is_none")]
         name: Option<String>
     },
     #[serde(rename = "assistant")]
     Assistant {
-        content: Option<Vec<ContentPart>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        content: Option<Content>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         tool_calls: Option<Vec<ToolCall>>
     },
     #[serde(rename = "tool")]
     Tool {
-        content: Vec<ContentPart>,
+        content: Content,
+        #[serde(skip_serializing_if = "Option::is_none")]
         name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         tool_call_id: Option<String>,
     },
 }
@@ -148,9 +158,9 @@ pub enum Content {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ContentPart {
-    #[serde(rename = "input_text")]
+    #[serde(rename = "text")]
     TextInput { text: String },
-    #[serde(rename = "input_image")]
+    #[serde(rename = "image_url")]
     ImageInput {
         image_url: ImageUrl,
     },
@@ -175,10 +185,23 @@ pub enum Effort {
     High,
 }
 
+impl FromStr for Effort {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "low" => Ok(Effort::Low),
+            "high" => Ok(Effort::High),
+            _ => Err(format!("Invalid effort value: {s}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageUrl {
-    url: String,
-    detail: Option<Detail>
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<Detail>
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -188,6 +211,7 @@ pub enum ToolCall {
     Function {
         function: FunctionCall,
         id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
         index: Option<u32>,
     }
 }
@@ -210,9 +234,9 @@ pub struct CompletionsResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Choice {
-    finish_reason: Option<FinishReason>,
-    index: u32,
-    message: ResponseMessage,
+    pub finish_reason: Option<FinishReason>,
+    pub index: u32,
+    pub message: ResponseMessage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -221,26 +245,26 @@ pub enum FinishReason {
     Stop,
     #[serde(rename = "length")]
     Length,
-    #[serde(rename = "max_tokens")]
-    MaxTokens,
     #[serde(rename = "end_turn")]
-    EndTurn
+    EndTurn,
+    #[serde(rename = "tool_calls")]
+    ToolCalls,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseMessage {
-    content: Option<String>,
-    reasoning_content: Option<String>,
-    refusal: Option<String>,
-    tool_call: Vec<ToolCall>
+    pub content: Option<String>,
+    pub reasoning_content: Option<String>,
+    pub refusal: Option<String>,
+    pub tool_calls: Option<Vec<ToolCall>>
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Usage {
     pub completion_tokens: u32,
-    pub completion_token_details: CompletionTokenDetails,
+    pub completion_tokens_details: CompletionTokenDetails,
     pub prompt_tokens: u32,
-    pub prompt_token_details: PromptTokenDetails,
+    pub prompt_tokens_details: PromptTokenDetails,
     pub total_tokens: u32,
 }
 
@@ -264,7 +288,7 @@ pub struct PromptTokenDetails {
 fn from_reqwest_error(details: impl AsRef<str>, err: reqwest::Error) -> Error {
     Error {
         code: ErrorCode::InternalError,
-        message: format!("{}: {err}", details.as_ref()),
+        message: format!("{}: {err:#?}", details.as_ref()),
         provider_error_json: None,
     }
 }
@@ -273,7 +297,7 @@ fn from_reqwest_error(details: impl AsRef<str>, err: reqwest::Error) -> Error {
 fn from_event_source_error(details: impl AsRef<str>, err: event_source::error::Error) -> Error {
     Error {
         code: ErrorCode::InternalError,
-        message: format!("{}: {err}", details.as_ref()),
+        message: format!("{}: {err:#?}", details.as_ref()),
         provider_error_json: None,
     }
 }

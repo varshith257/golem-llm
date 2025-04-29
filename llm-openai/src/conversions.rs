@@ -10,8 +10,6 @@ use golem_llm::golem::llm::llm::{
 pub fn messages_to_input_items(messages: Vec<Message>) -> Vec<InputItem> {
     let mut items = Vec::new();
     for message in messages {
-        // TODO: what about message.name?
-
         let role = to_openai_role_name(message.role).to_string();
         let mut input_items = Vec::new();
         for content_part in message.content {
@@ -133,7 +131,6 @@ pub fn process_model_response(response: CreateModelResponseResponse) -> ChatEven
                                 contents.push(ContentPart::Text(text));
                             }
                             OutputMessageContent::Refusal { refusal, .. } => {
-                                // TODO: ?
                                 contents.push(ContentPart::Text(format!("Refusal: {refusal}")));
                             }
                         }
@@ -176,7 +173,7 @@ pub fn create_response_metadata(response: &CreateModelResponseResponse) -> Respo
             output_tokens: Some(usage.output_tokens),
             total_tokens: Some(usage.total_tokens),
         }),
-        provider_id: None, // TODO
+        provider_id: Some(response.id.clone()),
         timestamp: Some(response.created_at.to_string()),
         provider_metadata_json: response.metadata.as_ref().map(|m| m.to_string()),
     }

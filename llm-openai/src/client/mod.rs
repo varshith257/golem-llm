@@ -126,7 +126,6 @@ pub enum OutputMessageContent {
     #[serde(rename = "output_text")]
     Text {
         text: String,
-        // TODO: do we need annotations?
     },
     #[serde(rename = "refusal")]
     Refusal { refusal: String },
