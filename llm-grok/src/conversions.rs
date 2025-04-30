@@ -48,20 +48,18 @@ pub fn messages_to_request(
         messages: completion_messages,
         model: config.model,
         frequency_penalty: options
-            .get(&"frequency_penalty".to_string())
+            .get("frequency_penalty")
             .and_then(|fp_s| fp_s.parse::<f32>().ok()),
         max_completion_tokens: config.max_tokens,
-        n: options
-            .get(&"n".to_string())
-            .and_then(|n_s| n_s.parse::<u32>().ok()),
+        n: options.get("n").and_then(|n_s| n_s.parse::<u32>().ok()),
         presence_penalty: options
-            .get(&"presence_penalty".to_string())
+            .get("presence_penalty")
             .and_then(|pp_s| pp_s.parse::<f32>().ok()),
         reasoning_effort: options
-            .get(&"reasoning_effort".to_string())
+            .get("reasoning_effort")
             .and_then(|effort_s| effort_s.parse::<Effort>().ok()),
         seed: options
-            .get(&"seed".to_string())
+            .get("seed")
             .and_then(|seed_s| seed_s.parse::<u32>().ok()),
         stop: config.stop_sequences,
         stream: Some(false),
@@ -70,10 +68,10 @@ pub fn messages_to_request(
         tool_choice: config.tool_choice,
         tools,
         top_logprobs: options
-            .get(&"top_logprobs".to_string())
+            .get("top_logprobs")
             .and_then(|top_logprobs_s| top_logprobs_s.parse::<u8>().ok()),
         top_p: options
-            .get(&"top_p".to_string())
+            .get("top_p")
             .and_then(|top_p_s| top_p_s.parse::<f32>().ok()),
         user: options.get("user_id").cloned(),
     })

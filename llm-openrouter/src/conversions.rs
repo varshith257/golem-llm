@@ -50,17 +50,17 @@ pub fn messages_to_request(
         messages: completion_messages,
         model: config.model,
         frequency_penalty: options
-            .get(&"frequency_penalty".to_string())
+            .get("frequency_penalty")
             .and_then(|fp_s| fp_s.parse::<f32>().ok()),
         max_tokens: config.max_tokens,
         presence_penalty: options
-            .get(&"presence_penalty".to_string())
+            .get("presence_penalty")
             .and_then(|pp_s| pp_s.parse::<f32>().ok()),
         repetition_penalty: options
-            .get(&"repetition_penalty".to_string())
+            .get("repetition_penalty")
             .and_then(|rp_s| rp_s.parse::<f32>().ok()),
         seed: options
-            .get(&"seed".to_string())
+            .get("seed")
             .and_then(|seed_s| seed_s.parse::<u32>().ok()),
         stop: config.stop_sequences,
         stream: Some(false),
@@ -68,16 +68,16 @@ pub fn messages_to_request(
         tool_choice: config.tool_choice.map(convert_tool_choice),
         tools,
         top_p: options
-            .get(&"top_p".to_string())
+            .get("top_p")
             .and_then(|top_p_s| top_p_s.parse::<f32>().ok()),
         top_k: options
-            .get(&"top_k".to_string())
+            .get("top_k")
             .and_then(|top_k_s| top_k_s.parse::<f32>().ok()),
         min_p: options
-            .get(&"min_p".to_string())
+            .get("min_p")
             .and_then(|min_p_s| min_p_s.parse::<f32>().ok()),
         top_a: options
-            .get(&"top_a".to_string())
+            .get("top_a")
             .and_then(|top_a_s| top_a_s.parse::<f32>().ok()),
     })
 }

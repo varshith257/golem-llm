@@ -56,7 +56,7 @@ pub fn messages_to_request(
         messages: anthropic_messages,
         model: config.model,
         metadata: options
-            .get(&"user_id".to_string())
+            .get("user_id")
             .map(|user_id| MessagesRequestMetadata {
                 user_id: Some(user_id.to_string()),
             }),
@@ -67,10 +67,10 @@ pub fn messages_to_request(
         tool_choice,
         tools,
         top_k: options
-            .get(&"top_k".to_string())
+            .get("top_k")
             .and_then(|top_k_s| top_k_s.parse::<u32>().ok()),
         top_p: options
-            .get(&"top_p".to_string())
+            .get("top_p")
             .and_then(|top_p_s| top_p_s.parse::<f32>().ok()),
     })
 }

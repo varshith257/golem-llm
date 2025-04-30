@@ -151,13 +151,13 @@ pub enum ImageSource {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MediaType {
     #[serde(rename = "image/jpeg")]
-    ImageJpeg,
+    Jpeg,
     #[serde(rename = "image/png")]
-    ImagePng,
+    Png,
     #[serde(rename = "image/svg+xml")]
-    ImageGif,
+    Gif,
     #[serde(rename = "image/webp")]
-    ImageWebp,
+    Webp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

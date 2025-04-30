@@ -73,19 +73,17 @@ impl GrokChatStream {
                             .tool_calls
                             .map(|calls| calls.iter().map(convert_tool_call).collect()),
                     })))
+                } else if let Some(usage) = message.usage {
+                    let finish_reason = self.finish_reason.borrow();
+                    Ok(Some(StreamEvent::Finish(ResponseMetadata {
+                        finish_reason: *finish_reason,
+                        usage: Some(convert_usage(&usage)),
+                        provider_id: None,
+                        timestamp: Some(message.created.to_string()),
+                        provider_metadata_json: None,
+                    })))
                 } else {
-                    if let Some(usage) = message.usage {
-                        let finish_reason = self.finish_reason.borrow();
-                        Ok(Some(StreamEvent::Finish(ResponseMetadata {
-                            finish_reason: finish_reason.clone(),
-                            usage: Some(convert_usage(&usage)),
-                            provider_id: None,
-                            timestamp: Some(message.created.to_string()),
-                            provider_metadata_json: None,
-                        })))
-                    } else {
-                        Ok(None)
-                    }
+                    Ok(None)
                 }
             }
             Some(_) => Ok(None),
@@ -223,7 +221,7 @@ impl Guest for GrokComponent {
 
             match messages_to_request(messages, config) {
                 Ok(request) => Self::request(client, request),
-                Err(err) => return ChatEvent::Error(err),
+                Err(err) => ChatEvent::Error(err),
             }
         })
     }
@@ -245,7 +243,7 @@ impl Guest for GrokComponent {
                         .extend(tool_results_to_messages(tool_results));
                     Self::request(client, request)
                 }
-                Err(err) => return ChatEvent::Error(err),
+                Err(err) => ChatEvent::Error(err),
             }
         })
     }

@@ -333,7 +333,7 @@ impl Guest for AnthropicComponent {
 
             match messages_to_request(messages, config) {
                 Ok(request) => Self::request(client, request),
-                Err(err) => return ChatEvent::Error(err),
+                Err(err) => ChatEvent::Error(err),
             }
         })
     }
@@ -355,7 +355,7 @@ impl Guest for AnthropicComponent {
                         .extend(tool_results_to_messages(tool_results));
                     Self::request(client, request)
                 }
-                Err(err) => return ChatEvent::Error(err),
+                Err(err) => ChatEvent::Error(err),
             }
         })
     }

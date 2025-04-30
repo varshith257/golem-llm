@@ -252,7 +252,7 @@ mod durable_impl {
                             (None, None)
                         } else {
                             let extended_messages =
-                                Impl::retry_prompt(&original_messages, &partial_result);
+                                Impl::retry_prompt(original_messages, partial_result);
 
                             let (stream, first_live_result) =
                                 with_persistence_level(PersistenceLevel::PersistNothing, || {
