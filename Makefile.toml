@@ -269,6 +269,7 @@ install_crate = "cargo-binstall"
 script = '''
 cargo-binstall golem-cli@1.2.2-dev.11 --locked --force --no-confirm
 cd test
+golem-cli --version
 golem-cli app clean
 golem-cli app build -b anthropic-debug
 golem-cli app clean
