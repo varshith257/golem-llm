@@ -13,7 +13,7 @@ use golem_llm::durability::{DurableLLM, ExtendedGuest};
 use golem_llm::event_source::{Event, EventSource, MessageEvent};
 use golem_llm::golem::llm::llm::{
     ChatEvent, ChatStream, Config, ContentPart, Error, ErrorCode, FinishReason, Guest,
-    GuestChatStream, Message, Pollable, ResponseMetadata, StreamDelta, StreamEvent, ToolCall,
+    GuestChatStream, Message, Pollable, ResponseMetadata, Role, StreamDelta, StreamEvent, ToolCall,
     ToolResult,
 };
 use golem_llm::LOGGING_STATE;
@@ -378,6 +378,55 @@ impl ExtendedGuest for OpenRouterComponent {
                 }
             },
         )
+    }
+
+    fn retry_prompt(original_messages: &[Message], partial_result: &[StreamDelta]) -> Vec<Message> {
+        let mut extended_messages = Vec::new();
+        extended_messages.push(Message {
+            role: Role::System,
+            name: None,
+            content: vec![
+                ContentPart::Text(
+                    "You were asked the same question previously, but the response was interrupted before completion. \
+                     Please continue your response from where you left off. \
+                     Do not include the part of the response that was already seen.".to_string()),
+            ],
+        });
+        extended_messages.push(Message {
+            role: Role::User,
+            name: None,
+            content: vec![ContentPart::Text(
+                "Here is the original question:".to_string(),
+            )],
+        });
+        extended_messages.extend_from_slice(original_messages);
+
+        let mut partial_result_as_content = Vec::new();
+        for delta in partial_result {
+            if let Some(contents) = &delta.content {
+                partial_result_as_content.extend_from_slice(contents);
+            }
+            if let Some(tool_calls) = &delta.tool_calls {
+                for tool_call in tool_calls {
+                    partial_result_as_content.push(ContentPart::Text(format!(
+                        "<tool-call id=\"{}\" name=\"{}\" arguments=\"{}\"/>",
+                        tool_call.id, tool_call.name, tool_call.arguments_json,
+                    )));
+                }
+            }
+        }
+
+        extended_messages.push(Message {
+            role: Role::User,
+            name: None,
+            content: vec![ContentPart::Text(
+                "Here is the partial response that was successfully received:".to_string(),
+            )]
+            .into_iter()
+            .chain(partial_result_as_content)
+            .collect(),
+        });
+        extended_messages
     }
 }
 
