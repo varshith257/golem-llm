@@ -1,3 +1,4 @@
+pub mod chat_stream;
 pub mod config;
 pub mod durability;
 pub mod error;
@@ -27,6 +28,7 @@ pub struct LoggingState {
 }
 
 impl LoggingState {
+    /// Initializes WASI logging based on the `GOLEM_LLM_LOG` environment variable.
     pub fn init(&mut self) {
         if !self.logging_initialized {
             let _ = wasi_logger::Logger::install();

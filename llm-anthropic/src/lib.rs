@@ -8,18 +8,18 @@ use crate::conversions::{
     convert_usage, messages_to_request, process_response, stop_reason_to_finish_reason,
     tool_results_to_messages,
 };
+use golem_llm::chat_stream::{LlmChatStream, LlmChatStreamState};
 use golem_llm::config::with_config_key;
 use golem_llm::durability::{DurableLLM, ExtendedGuest};
-use golem_llm::event_source::{Event, EventSource, MessageEvent};
+use golem_llm::event_source::EventSource;
 use golem_llm::golem::llm::llm::{
-    ChatEvent, ChatStream, Config, ContentPart, Error, ErrorCode, Guest, GuestChatStream, Message,
-    Pollable, ResponseMetadata, Role, StreamDelta, StreamEvent, ToolCall, ToolResult,
+    ChatEvent, ChatStream, Config, ContentPart, Error, ErrorCode, Guest, Message, ResponseMetadata,
+    Role, StreamDelta, StreamEvent, ToolCall, ToolResult,
 };
 use golem_llm::LOGGING_STATE;
 use log::trace;
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell, RefMut};
 use std::collections::HashMap;
-use std::task::Poll;
 
 #[derive(Default)]
 struct JsonFragment {
@@ -37,8 +37,8 @@ struct AnthropicChatStream {
 }
 
 impl AnthropicChatStream {
-    pub fn new(stream: EventSource) -> Self {
-        AnthropicChatStream {
+    pub fn new(stream: EventSource) -> LlmChatStream<Self> {
+        LlmChatStream::new(AnthropicChatStream {
             stream: RefCell::new(Some(stream)),
             failure: None,
             finished: RefCell::new(false),
@@ -50,11 +50,11 @@ impl AnthropicChatStream {
                 timestamp: None,
                 provider_metadata_json: None,
             }),
-        }
+        })
     }
 
-    pub fn failed(error: Error) -> Self {
-        AnthropicChatStream {
+    pub fn failed(error: Error) -> LlmChatStream<Self> {
+        LlmChatStream::new(AnthropicChatStream {
             stream: RefCell::new(None),
             failure: Some(error),
             finished: RefCell::new(false),
@@ -66,7 +66,29 @@ impl AnthropicChatStream {
                 timestamp: None,
                 provider_metadata_json: None,
             }),
-        }
+        })
+    }
+}
+
+impl LlmChatStreamState for AnthropicChatStream {
+    fn failure(&self) -> &Option<Error> {
+        &self.failure
+    }
+
+    fn is_finished(&self) -> bool {
+        *self.finished.borrow()
+    }
+
+    fn set_finished(&self) {
+        *self.finished.borrow_mut() = true;
+    }
+
+    fn stream(&self) -> Ref<Option<EventSource>> {
+        self.stream.borrow()
+    }
+
+    fn stream_mut(&self) -> RefMut<Option<EventSource>> {
+        self.stream.borrow_mut()
     }
 
     fn decode_message(&self, raw: &str) -> Result<Option<StreamEvent>, String> {
@@ -209,98 +231,6 @@ impl AnthropicChatStream {
     }
 }
 
-// TODO: probably all ChatStream implementations can be the same just with different decode_message implementation
-impl GuestChatStream for AnthropicChatStream {
-    fn get_next(&self) -> Option<Vec<StreamEvent>> {
-        if *self.finished.borrow() {
-            return Some(vec![]);
-        }
-
-        let mut stream = self.stream.borrow_mut();
-        if let Some(stream) = stream.as_mut() {
-            match stream.poll_next() {
-                Poll::Ready(None) => {
-                    *self.finished.borrow_mut() = true;
-                    Some(vec![])
-                }
-                Poll::Ready(Some(Err(golem_llm::event_source::error::Error::StreamEnded))) => {
-                    *self.finished.borrow_mut() = true;
-                    Some(vec![])
-                }
-                Poll::Ready(Some(Err(error))) => Some(vec![StreamEvent::Error(Error {
-                    code: ErrorCode::InternalError,
-                    message: error.to_string(),
-                    provider_error_json: None,
-                })]),
-                Poll::Ready(Some(Ok(event))) => {
-                    let mut events = vec![];
-
-                    match event {
-                        Event::Open => {}
-                        Event::Message(MessageEvent { data, .. }) => {
-                            if data != "[DONE]" {
-                                match self.decode_message(&data) {
-                                    Ok(Some(stream_event)) => {
-                                        if matches!(stream_event, StreamEvent::Finish(_)) {
-                                            *self.finished.borrow_mut() = true;
-                                        }
-                                        events.push(stream_event);
-                                    }
-                                    Ok(None) => {
-                                        // Ignored event
-                                    }
-                                    Err(error) => {
-                                        events.push(StreamEvent::Error(Error {
-                                            code: ErrorCode::InternalError,
-                                            message: error,
-                                            provider_error_json: None,
-                                        }));
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if events.is_empty() {
-                        None
-                    } else {
-                        Some(events)
-                    }
-                }
-                Poll::Pending => None,
-            }
-        } else if let Some(error) = self.failure.clone() {
-            *self.finished.borrow_mut() = true;
-            Some(vec![StreamEvent::Error(error)])
-        } else {
-            None
-        }
-    }
-
-    fn blocking_get_next(&self) -> Vec<StreamEvent> {
-        let pollable = self.subscribe();
-        let mut result = Vec::new();
-        loop {
-            pollable.block();
-            match self.get_next() {
-                Some(events) => {
-                    result.extend(events);
-                    break result;
-                }
-                None => continue,
-            }
-        }
-    }
-
-    fn subscribe(&self) -> Pollable {
-        if let Some(stream) = self.stream.borrow().as_ref() {
-            stream.subscribe()
-        } else {
-            golem_rust::bindings::wasi::clocks::monotonic_clock::subscribe_duration(0)
-        }
-    }
-}
-
 struct AnthropicComponent;
 
 impl AnthropicComponent {
@@ -313,7 +243,10 @@ impl AnthropicComponent {
         }
     }
 
-    fn streaming_request(client: MessagesApi, mut request: MessagesRequest) -> AnthropicChatStream {
+    fn streaming_request(
+        client: MessagesApi,
+        mut request: MessagesRequest,
+    ) -> LlmChatStream<AnthropicChatStream> {
         request.stream = true;
         match client.stream_send_messages(request) {
             Ok(stream) => AnthropicChatStream::new(stream),
@@ -323,11 +256,10 @@ impl AnthropicComponent {
 }
 
 impl Guest for AnthropicComponent {
-    type ChatStream = AnthropicChatStream;
+    type ChatStream = LlmChatStream<AnthropicChatStream>;
 
     fn send(messages: Vec<Message>, config: Config) -> ChatEvent {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
-
         with_config_key(Self::ENV_VAR_NAME, ChatEvent::Error, |anthropic_api_key| {
             let client = MessagesApi::new(anthropic_api_key);
 
@@ -366,7 +298,10 @@ impl Guest for AnthropicComponent {
 }
 
 impl ExtendedGuest for AnthropicComponent {
-    fn unwrapped_stream(messages: Vec<Message>, config: Config) -> AnthropicChatStream {
+    fn unwrapped_stream(
+        messages: Vec<Message>,
+        config: Config,
+    ) -> LlmChatStream<AnthropicChatStream> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
         with_config_key(

@@ -6,17 +6,17 @@ use crate::conversions::{
     create_response_metadata, messages_to_input_items, parse_error_code, process_model_response,
     tool_defs_to_tools, tool_results_to_input_items,
 };
+use golem_llm::chat_stream::{LlmChatStream, LlmChatStreamState};
 use golem_llm::config::with_config_key;
 use golem_llm::durability::{DurableLLM, ExtendedGuest};
-use golem_llm::event_source::{Event, EventSource, MessageEvent};
+use golem_llm::event_source::EventSource;
 use golem_llm::golem::llm::llm::{
-    ChatEvent, ChatStream, Config, ContentPart, Error, ErrorCode, Guest, GuestChatStream, Message,
-    Pollable, StreamDelta, StreamEvent, ToolCall, ToolResult,
+    ChatEvent, ChatStream, Config, ContentPart, Error, ErrorCode, Guest, Message, StreamDelta,
+    StreamEvent, ToolCall, ToolResult,
 };
 use golem_llm::LOGGING_STATE;
 use log::trace;
-use std::cell::RefCell;
-use std::task::Poll;
+use std::cell::{Ref, RefCell, RefMut};
 
 mod client;
 mod conversions;
@@ -28,23 +28,45 @@ struct OpenAIChatStream {
 }
 
 impl OpenAIChatStream {
-    pub fn new(stream: EventSource) -> Self {
-        OpenAIChatStream {
+    pub fn new(stream: EventSource) -> LlmChatStream<Self> {
+        LlmChatStream::new(OpenAIChatStream {
             stream: RefCell::new(Some(stream)),
             failure: None,
             finished: RefCell::new(false),
-        }
+        })
     }
 
-    pub fn failed(error: Error) -> Self {
-        OpenAIChatStream {
+    pub fn failed(error: Error) -> LlmChatStream<Self> {
+        LlmChatStream::new(OpenAIChatStream {
             stream: RefCell::new(None),
             failure: Some(error),
             finished: RefCell::new(false),
-        }
+        })
+    }
+}
+
+impl LlmChatStreamState for OpenAIChatStream {
+    fn failure(&self) -> &Option<Error> {
+        &self.failure
     }
 
-    fn decode_message(raw: &str) -> Result<Option<StreamEvent>, String> {
+    fn is_finished(&self) -> bool {
+        *self.finished.borrow()
+    }
+
+    fn set_finished(&self) {
+        *self.finished.borrow_mut() = true;
+    }
+
+    fn stream(&self) -> Ref<Option<EventSource>> {
+        self.stream.borrow()
+    }
+
+    fn stream_mut(&self) -> RefMut<Option<EventSource>> {
+        self.stream.borrow_mut()
+    }
+
+    fn decode_message(&self, raw: &str) -> Result<Option<StreamEvent>, String> {
         trace!("Received raw stream event: {raw}");
         let json: serde_json::Value = serde_json::from_str(raw)
             .map_err(|err| format!("Failed to deserialize stream event: {err}"))?;
@@ -133,97 +155,6 @@ impl OpenAIChatStream {
     }
 }
 
-impl GuestChatStream for OpenAIChatStream {
-    fn get_next(&self) -> Option<Vec<StreamEvent>> {
-        if *self.finished.borrow() {
-            return Some(vec![]);
-        }
-
-        let mut stream = self.stream.borrow_mut();
-        if let Some(stream) = stream.as_mut() {
-            match stream.poll_next() {
-                Poll::Ready(None) => {
-                    *self.finished.borrow_mut() = true;
-                    Some(vec![])
-                }
-                Poll::Ready(Some(Err(golem_llm::event_source::error::Error::StreamEnded))) => {
-                    *self.finished.borrow_mut() = true;
-                    Some(vec![])
-                }
-                Poll::Ready(Some(Err(error))) => Some(vec![StreamEvent::Error(Error {
-                    code: ErrorCode::InternalError,
-                    message: error.to_string(),
-                    provider_error_json: None,
-                })]),
-                Poll::Ready(Some(Ok(event))) => {
-                    let mut events = vec![];
-
-                    match event {
-                        Event::Open => {}
-                        Event::Message(MessageEvent { data, .. }) => {
-                            if data != "[DONE]" {
-                                match Self::decode_message(&data) {
-                                    Ok(Some(stream_event)) => {
-                                        if matches!(stream_event, StreamEvent::Finish(_)) {
-                                            *self.finished.borrow_mut() = true;
-                                        }
-                                        events.push(stream_event);
-                                    }
-                                    Ok(None) => {
-                                        // Ignored event
-                                    }
-                                    Err(error) => {
-                                        events.push(StreamEvent::Error(Error {
-                                            code: ErrorCode::InternalError,
-                                            message: error,
-                                            provider_error_json: None,
-                                        }));
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if events.is_empty() {
-                        None
-                    } else {
-                        Some(events)
-                    }
-                }
-                Poll::Pending => None,
-            }
-        } else if let Some(error) = self.failure.clone() {
-            *self.finished.borrow_mut() = true;
-            Some(vec![StreamEvent::Error(error)])
-        } else {
-            None
-        }
-    }
-
-    fn blocking_get_next(&self) -> Vec<StreamEvent> {
-        let pollable = self.subscribe();
-        let mut result = Vec::new();
-        loop {
-            pollable.block();
-            match self.get_next() {
-                Some(events) => {
-                    result.extend(events);
-                    break result;
-                }
-                None => continue,
-            }
-        }
-    }
-
-    fn subscribe(&self) -> Pollable {
-        if let Some(stream) = self.stream.borrow().as_ref() {
-            stream.subscribe()
-        } else {
-            golem_rust::bindings::wasi::clocks::monotonic_clock::subscribe_duration(0)
-        }
-    }
-}
-
 struct OpenAIComponent;
 
 impl OpenAIComponent {
@@ -254,7 +185,7 @@ impl OpenAIComponent {
         client: ResponsesApi,
         items: Vec<InputItem>,
         config: Config,
-    ) -> OpenAIChatStream {
+    ) -> LlmChatStream<OpenAIChatStream> {
         match tool_defs_to_tools(config.tools) {
             Ok(tools) => {
                 let request = CreateModelResponseRequest {
@@ -277,7 +208,7 @@ impl OpenAIComponent {
 }
 
 impl Guest for OpenAIComponent {
-    type ChatStream = OpenAIChatStream;
+    type ChatStream = LlmChatStream<OpenAIChatStream>;
 
     fn send(messages: Vec<Message>, config: Config) -> ChatEvent {
         LOGGING_STATE.with_borrow_mut(|state| state.init());

@@ -1,13 +1,19 @@
 use crate::golem::llm::llm::{Config, ContentPart, Guest, Message, Role, StreamDelta};
 use std::marker::PhantomData;
 
+/// Wraps an LLM implementation with custom durability
 pub struct DurableLLM<Impl> {
     phantom: PhantomData<Impl>,
 }
 
+/// Trait to be implemented in addition to the LLM `Guest` trait when wrapping it with `DurableLLM`.
 pub trait ExtendedGuest: Guest + 'static {
+    /// Creates an instance of the LLM specific `ChatStream` without wrapping it in a `Resource`
     fn unwrapped_stream(messages: Vec<Message>, config: Config) -> Self::ChatStream;
 
+    /// Creates the retry prompt with a combination of the original messages, and the partially received
+    /// streaming responses. There is a default implementation here, but it can be overridden with provider-specific
+    /// prompts if needed.
     fn retry_prompt(original_messages: &[Message], partial_result: &[StreamDelta]) -> Vec<Message> {
         let mut extended_messages = Vec::new();
         extended_messages.push(Message {
@@ -52,6 +58,7 @@ pub trait ExtendedGuest: Guest + 'static {
     }
 }
 
+/// When the durability feature flag is off, wrapping with `DurableLLM` is just a passthrough
 #[cfg(not(feature = "durability"))]
 mod passthrough_impl {
     use crate::durability::{DurableLLM, ExtendedGuest};
@@ -80,6 +87,14 @@ mod passthrough_impl {
     }
 }
 
+/// When the durability feature flag is on, wrapping with `DurableLLM` adds custom durability
+/// on top of the provider-specific LLM implementation using Golem's special host functions and
+/// the `golem-rust` helper library.
+///
+/// There will be custom durability entries saved in the oplog, with the full LLM request and configuration
+/// stored as input, and the full response stored as output. To serialize these in a way it is
+/// observable by oplog consumers, each relevant data type has to be converted to/from `ValueAndType`
+/// which is implemented using the type classes and builder in the `golem-rust` library.
 #[cfg(feature = "durability")]
 mod durable_impl {
     use crate::durability::{DurableLLM, ExtendedGuest};
@@ -168,6 +183,18 @@ mod durable_impl {
         }
     }
 
+    /// Represents the durable chat stream's state
+    ///
+    /// In live mode it directly calls the underlying LLM stream which is implemented on
+    /// top of an SSE parser using the wasi-http response body stream.
+    ///
+    /// In replay mode it buffers the replayed messages, and also tracks the created pollables
+    /// to be able to reattach them to the new live stream when the switch to live mode
+    /// happens.
+    ///
+    /// When reaching the end of the replay mode, if the replayed stream was not finished yet,
+    /// the replay prompt implemented in `ExtendedGuest` is used to create a new LLM response
+    /// stream and continue the response seamlessly.
     enum DurableChatStreamState<Impl: ExtendedGuest> {
         Live {
             stream: Impl::ChatStream,

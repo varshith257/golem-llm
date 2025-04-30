@@ -1,5 +1,6 @@
 use crate::golem::llm::llm::{Error, ErrorCode};
 
+/// Creates an `Error` value representing that something is unsuported
 pub fn unsupported(what: impl AsRef<str>) -> Error {
     Error {
         code: ErrorCode::Unsupported,
