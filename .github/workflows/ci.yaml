@@ -34,7 +34,7 @@ jobs:
       - name: Check formatting and clippy rules
         run: cargo make check
       - name: Run tests
-        run: cargo make test
+        run: cargo make unit-tests
   build-all:
     runs-on: ubuntu-latest
     if: "!startsWith(github.ref, 'refs/tags/v')"
