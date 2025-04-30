@@ -28,6 +28,7 @@ const IMAGE_MODEL: &'static str = "grok-2-vision-latest";
 const IMAGE_MODEL: &'static str = "openrouter/auto";
 
 impl Guest for Component {
+    /// test1 demonstrates a simple, non-streaming text question-answer interaction with the LLM.
     fn test1() -> String {
         let config = llm::Config {
             model: MODEL.to_string(),
@@ -81,6 +82,8 @@ impl Guest for Component {
         }
     }
 
+    /// test2 demonstrates how to use tools with the LLM, including generating a tool response
+    /// and continuing the conversation with it.
     fn test2() -> String {
         let config = llm::Config {
             model: MODEL.to_string(),
@@ -190,6 +193,7 @@ impl Guest for Component {
         }
     }
 
+    /// test3 is a streaming version of test1, a single turn question-answer interaction
     fn test3() -> String {
         let config = llm::Config {
             model: MODEL.to_string(),
@@ -247,6 +251,7 @@ impl Guest for Component {
         result
     }
 
+    /// test4 shows how streaming works together with using tools
     fn test4() -> String {
         let config = llm::Config {
             model: MODEL.to_string(),
@@ -325,6 +330,7 @@ impl Guest for Component {
         result
     }
 
+    /// test5 demonstrates how to send image urls to the LLM
     fn test5() {
         let config = llm::Config {
             model: IMAGE_MODEL.to_string(),
@@ -364,6 +370,8 @@ impl Guest for Component {
         println!("Response: {:?}", response);
     }
 
+    /// test6 simulates a crash during a streaming LLM response, but only first time. 
+    /// after the automatic recovery it will continue and finish the request successfully.
     fn test6() -> String {
         let config = llm::Config {
             model: MODEL.to_string(),
