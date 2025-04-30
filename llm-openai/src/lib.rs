@@ -1,10 +1,10 @@
 use crate::client::{
-    CreateModelResponseRequest, CreateModelResponseResponse, Input, InputItem, OutputItem,
-    ResponseOutputItemDone, ResponseOutputTextDelta, ResponsesApi,
+    CreateModelResponseResponse, InputItem, OutputItem, ResponseOutputItemDone,
+    ResponseOutputTextDelta, ResponsesApi,
 };
 use crate::conversions::{
-    create_response_metadata, messages_to_input_items, parse_error_code, process_model_response,
-    tool_defs_to_tools, tool_results_to_input_items,
+    create_request, create_response_metadata, messages_to_input_items, parse_error_code,
+    process_model_response, tool_defs_to_tools, tool_results_to_input_items,
 };
 use golem_llm::chat_stream::{LlmChatStream, LlmChatStreamState};
 use golem_llm::config::with_config_key;
@@ -161,17 +161,9 @@ impl OpenAIComponent {
     const ENV_VAR_NAME: &'static str = "OPENAI_API_KEY";
 
     fn request(client: ResponsesApi, items: Vec<InputItem>, config: Config) -> ChatEvent {
-        match tool_defs_to_tools(config.tools) {
+        match tool_defs_to_tools(&config.tools) {
             Ok(tools) => {
-                let request = CreateModelResponseRequest {
-                    input: Input::List(items),
-                    model: config.model,
-                    temperature: config.temperature,
-                    max_output_tokens: config.max_tokens,
-                    tools,
-                    tool_choice: config.tool_choice,
-                    stream: false,
-                };
+                let request = create_request(items, config, tools);
                 match client.create_model_response(request) {
                     Ok(response) => process_model_response(response),
                     Err(error) => ChatEvent::Error(error),
@@ -186,17 +178,10 @@ impl OpenAIComponent {
         items: Vec<InputItem>,
         config: Config,
     ) -> LlmChatStream<OpenAIChatStream> {
-        match tool_defs_to_tools(config.tools) {
+        match tool_defs_to_tools(&config.tools) {
             Ok(tools) => {
-                let request = CreateModelResponseRequest {
-                    input: Input::List(items),
-                    model: config.model,
-                    temperature: config.temperature,
-                    max_output_tokens: config.max_tokens,
-                    tools,
-                    tool_choice: config.tool_choice,
-                    stream: true,
-                };
+                let mut request = create_request(items, config, tools);
+                request.stream = true;
                 match client.stream_model_response(request) {
                     Ok(stream) => OpenAIChatStream::new(stream),
                     Err(error) => OpenAIChatStream::failed(error),

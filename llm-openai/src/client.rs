@@ -84,8 +84,10 @@ pub struct CreateModelResponseRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<String>,
     pub stream: bool,
-    // TODO: stop-sequences ???
-    // TODO: what to expose through provider-options ???
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

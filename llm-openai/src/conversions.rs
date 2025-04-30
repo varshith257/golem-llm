@@ -1,11 +1,43 @@
 use crate::client::{
-    CreateModelResponseResponse, Detail, InnerInput, InnerInputItem, InputItem, OutputItem,
-    OutputMessageContent, Tool,
+    CreateModelResponseRequest, CreateModelResponseResponse, Detail, InnerInput, InnerInputItem,
+    Input, InputItem, OutputItem, OutputMessageContent, Tool,
 };
+use golem_llm::error::error_code_from_status;
 use golem_llm::golem::llm::llm::{
-    ChatEvent, CompleteResponse, ContentPart, Error, ErrorCode, ImageDetail, Message,
+    ChatEvent, CompleteResponse, Config, ContentPart, Error, ErrorCode, ImageDetail, Message,
     ResponseMetadata, Role, ToolCall, ToolDefinition, ToolResult, Usage,
 };
+use reqwest::StatusCode;
+use std::collections::HashMap;
+use std::str::FromStr;
+
+pub fn create_request(
+    items: Vec<InputItem>,
+    config: Config,
+    tools: Vec<Tool>,
+) -> CreateModelResponseRequest {
+    let options = config
+        .provider_options
+        .into_iter()
+        .map(|kv| (kv.key, kv.value))
+        .collect::<HashMap<_, _>>();
+
+    CreateModelResponseRequest {
+        input: Input::List(items),
+        model: config.model,
+        temperature: config.temperature,
+        max_output_tokens: config.max_tokens,
+        tools,
+        tool_choice: config.tool_choice,
+        stream: false,
+        top_p: options
+            .get("top_p")
+            .and_then(|top_p_s| top_p_s.parse::<f32>().ok()),
+        user: options
+            .get("user")
+            .and_then(|user_s| user_s.parse::<String>().ok()),
+    }
+}
 
 pub fn messages_to_input_items(messages: Vec<Message>) -> Vec<InputItem> {
     let mut items = Vec::new();
@@ -52,14 +84,14 @@ pub fn tool_results_to_input_items(tool_results: Vec<(ToolCall, ToolResult)>) ->
     items
 }
 
-pub fn tool_defs_to_tools(tool_definitions: Vec<ToolDefinition>) -> Result<Vec<Tool>, Error> {
+pub fn tool_defs_to_tools(tool_definitions: &[ToolDefinition]) -> Result<Vec<Tool>, Error> {
     let mut tools = Vec::new();
     for tool_def in tool_definitions {
         match serde_json::from_str(&tool_def.parameters_schema) {
             Ok(value) => {
                 let tool = Tool::Function {
-                    name: tool_def.name,
-                    description: tool_def.description,
+                    name: tool_def.name.clone(),
+                    description: tool_def.description.clone(),
                     parameters: Some(value),
                     strict: true,
                 };
@@ -104,9 +136,15 @@ pub fn content_part_to_inner_input_item(content_part: ContentPart) -> InnerInput
     }
 }
 
-pub fn parse_error_code(_code: String) -> ErrorCode {
-    // TODO: we don't know what `code` can be..
-    ErrorCode::InternalError
+pub fn parse_error_code(code: String) -> ErrorCode {
+    if let Some(code) = <u16 as FromStr>::from_str(&code)
+        .ok()
+        .and_then(|code| StatusCode::from_u16(code).ok())
+    {
+        error_code_from_status(code)
+    } else {
+        ErrorCode::InternalError
+    }
 }
 
 pub fn process_model_response(response: CreateModelResponseResponse) -> ChatEvent {
@@ -167,7 +205,7 @@ pub fn process_model_response(response: CreateModelResponseResponse) -> ChatEven
 
 pub fn create_response_metadata(response: &CreateModelResponseResponse) -> ResponseMetadata {
     ResponseMetadata {
-        finish_reason: None, // TODO
+        finish_reason: None,
         usage: response.usage.as_ref().map(|usage| Usage {
             input_tokens: Some(usage.input_tokens),
             output_tokens: Some(usage.output_tokens),
