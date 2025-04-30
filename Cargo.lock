@@ -376,7 +376,6 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "wasi-logger",
  "wit-bindgen-rt 0.40.0",
 ]
 

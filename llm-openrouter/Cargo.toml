@@ -11,15 +11,19 @@ description = "WebAssembly component for working with OpenRouter APIs, with spec
 path = "src/lib.rs"
 crate-type = ["cdylib"]
 
+[features]
+default = ["durability"]
+durability = ["golem-rust/durability", "golem-llm/durability"]
+
 [dependencies]
-golem-llm = { path = "../llm", version = "0.0.1" }
+golem-llm = { path = "../llm", version = "0.0.1", default-features = false }
 
 golem-rust = { workspace = true }
-log = "0.4.27"
+log = { workspace = true }
 reqwest =  { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-wit-bindgen-rt = { version = "0.40.0", features = ["bitflags"] }
+wit-bindgen-rt = { workspace = true }
 
 [package.metadata.component]
 package = "golem:llm-openrouter"
