@@ -12,10 +12,10 @@ There are 8 published WASM files for each release:
 | `golem-llm-grok.wasm`                | LLM implementation for xAI (Grok), using custom Golem specific durability features   |
 | `golem-llm-openai.wasm`              | LLM implementation for OpenAI, using custom Golem specific durability features       |
 | `golem-llm-openrouter.wasm`          | LLM implementation for OpenRouter, using custom Golem specific durability features   |
-| `golem-llm-anthropic-portable.wasm`  | LLM implementation for Anthropic AI, with no Golem specific dependecies.             |
-| `golem-llm-grok-portable.wasm`       | LLM implementation for xAI (Grok), with no Golem specific dependecies.               |
-| `golem-llm-openai-portable.wasm`     | LLM implementation for OpenAI, with no Golem specific dependecies.                   |
-| `golem-llm-openrouter-portable.wasm` | LLM implementation for OpenRouter, with no Golem specific dependecies.               |
+| `golem-llm-anthropic-portable.wasm`  | LLM implementation for Anthropic AI, with no Golem specific dependencies.            |
+| `golem-llm-grok-portable.wasm`       | LLM implementation for xAI (Grok), with no Golem specific dependencies.              |
+| `golem-llm-openai-portable.wasm`     | LLM implementation for OpenAI, with no Golem specific dependencies.                  |
+| `golem-llm-openrouter-portable.wasm` | LLM implementation for OpenRouter, with no Golem specific dependencies.              |
 
 Every component **exports** the same `golem:llm` interface, [defined here](wit/golem-llm.wit).
 
@@ -50,7 +50,7 @@ The easiest way to get started is to use one of the predefined **templates** Gol
 
 To existing Golem applications the `golem-llm` WASM components can be added as a **binary dependency**.
 
-***NOT AVAILABLE YET**
+**NOT AVAILABLE YET**
 
 #### Integrating the composing step to the build
 
