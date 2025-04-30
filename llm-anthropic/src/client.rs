@@ -1,9 +1,9 @@
-use golem_llm::event_source;
+use golem_llm::error::{error_code_from_status, from_event_source_error, from_reqwest_error};
 use golem_llm::event_source::EventSource;
-use golem_llm::golem::llm::llm::{Error, ErrorCode};
+use golem_llm::golem::llm::llm::Error;
 use log::trace;
 use reqwest::header::HeaderValue;
-use reqwest::{Client, Method, Response, StatusCode};
+use reqwest::{Client, Method, Response};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -258,24 +258,6 @@ pub enum ContentBlockDelta {
     InputJsonDelta { partial_json: String },
 }
 
-// TODO: to shared lib
-fn from_reqwest_error(details: impl AsRef<str>, err: reqwest::Error) -> Error {
-    Error {
-        code: ErrorCode::InternalError,
-        message: format!("{}: {err}", details.as_ref()),
-        provider_error_json: None,
-    }
-}
-
-// TODO: to shared lib
-fn from_event_source_error(details: impl AsRef<str>, err: event_source::error::Error) -> Error {
-    Error {
-        code: ErrorCode::InternalError,
-        message: format!("{}: {err}", details.as_ref()),
-        provider_error_json: None,
-    }
-}
-
 fn parse_response<T: DeserializeOwned + Debug>(response: Response) -> Result<T, Error> {
     let status = response.status();
     if status.is_success() {
@@ -298,21 +280,5 @@ fn parse_response<T: DeserializeOwned + Debug>(response: Response) -> Result<T, 
             message: format!("Request failed with {status}: {}", error_body.error.message),
             provider_error_json: Some(serde_json::to_string(&error_body).unwrap()),
         })
-    }
-}
-
-// TODO: to shared lib
-fn error_code_from_status(status: StatusCode) -> ErrorCode {
-    if status == StatusCode::TOO_MANY_REQUESTS {
-        ErrorCode::RateLimitExceeded
-    } else if status == StatusCode::UNAUTHORIZED
-        || status == StatusCode::FORBIDDEN
-        || status == StatusCode::PAYMENT_REQUIRED
-    {
-        ErrorCode::AuthenticationFailed
-    } else if status.is_client_error() {
-        ErrorCode::InvalidRequest
-    } else {
-        ErrorCode::InternalError
     }
 }

@@ -1,9 +1,7 @@
 mod client;
 mod conversions;
 
-use crate::client::{
-    error_code_from_status, ChatCompletionChunk, CompletionsApi, CompletionsRequest, FunctionCall,
-};
+use crate::client::{ChatCompletionChunk, CompletionsApi, CompletionsRequest, FunctionCall};
 use crate::conversions::{
     convert_finish_reason, convert_usage, messages_to_request, process_response,
     tool_results_to_messages,
@@ -11,6 +9,7 @@ use crate::conversions::{
 use golem_llm::chat_stream::{LlmChatStream, LlmChatStreamState};
 use golem_llm::config::with_config_key;
 use golem_llm::durability::{DurableLLM, ExtendedGuest};
+use golem_llm::error::error_code_from_status;
 use golem_llm::event_source::EventSource;
 use golem_llm::golem::llm::llm::{
     ChatEvent, ChatStream, Config, ContentPart, Error, FinishReason, Guest, Message,
