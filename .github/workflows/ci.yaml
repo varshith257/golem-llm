@@ -55,7 +55,10 @@ jobs:
           toolchain: stable
           override: true
       - uses: davidB/rust-cargo-make@v1
-      - name: Check formatting and clippy rules
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install cargo-component
+        run: cargo binstall --force --locked cargo-component@0.20.0
+      - name: Build all
         run: cargo make build-all
   build-test-components:
     runs-on: ubuntu-latest
@@ -104,7 +107,10 @@ jobs:
           toolchain: stable
           override: true
       - uses: davidB/rust-cargo-make@v1
-      - name: Check formatting and clippy rules
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install cargo-component
+        run: cargo binstall --force --locked cargo-component@0.20.0
+      - name: Build all components in release
         run: cargo make release-build-all
       - name: Login GH CLI
         shell: bash
