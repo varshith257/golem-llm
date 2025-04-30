@@ -35,7 +35,7 @@ path = "wit-generated"
 "golem:rpc/types@0.2.0" = "golem_rust::wasm_rpc::golem_rpc_0_2_x::types"
 
 [package.metadata.component.target.dependencies]
-"wasi:io" = { path = "wit-generated/deps/wasi:io" }
+"wasi:io" = { path = "wit-generated/deps/io" }
 "golem:llm" = { path = "wit-generated/deps/golem-llm" }
 "wasi:clocks" = { path = "wit-generated/deps/clocks" }
 "golem:rpc" = { path = "wit-generated/deps/golem-rpc" }

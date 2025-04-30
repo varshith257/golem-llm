@@ -221,6 +221,15 @@ rm -r llm-openrouter/wit/deps
 mkdir llm-openrouter/wit/deps/golem-llm
 cp wit/golem-llm.wit llm-openrouter/wit/deps/golem-llm/golem-llm.wit
 cp wit/deps/wasi:io llm-openrouter/wit/deps
+
+rm -r test/wit
+mkdir test/wit/deps/golem-llm
+mkdir test/wit/deps/io
+cp wit/golem-llm.wit test/wit/deps/golem-llm/golem-llm.wit
+cp wit/deps/wasi:io/error.wit test/wit/deps/io/error.wit
+cp wit/deps/wasi:io/poll.wit test/wit/deps/io/poll.wit
+cp wit/deps/wasi:io/streams.wit test/wit/deps/io/streams.wit
+cp wit/deps/wasi:io/world.wit test/wit/deps/io/world.wit
 """
 
 [tasks.check]
@@ -264,6 +273,7 @@ args = [
 ]
 
 [tasks.build-test-components]
+dependencies = ["build"]
 description = "Builds all test components with golem-cli"
 install_crate = "cargo-binstall"
 script = '''

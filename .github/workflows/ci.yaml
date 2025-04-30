@@ -63,25 +63,27 @@ jobs:
   build-test-components:
     runs-on: ubuntu-latest
     steps:
-     - uses: actions/checkout@v4
-     - uses: actions/cache@v3
-       with:
-         path: |
-           ~/.cargo/bin/
-           ~/.cargo/registry/index/
-           ~/.cargo/registry/cache/
-           ~/.cargo/git/db/
-           target/
-         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-is
-     - name: Setup Rust
-       uses: actions-rs/toolchain@v1
-       with:
-         toolchain: stable
-         override: true
-     - uses: davidB/rust-cargo-make@v1
-     - uses: cargo-bins/cargo-binstall@main
-     - name: Build all test components
-       run: cargo make build-test-components
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-is
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - uses: davidB/rust-cargo-make@v1
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install cargo-component
+        run: cargo binstall --force --locked cargo-component@0.20.0
+      - name: Build all test components
+        run: cargo make build-test-components
   publish-all:
     needs:
       - tests
