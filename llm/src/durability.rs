@@ -211,6 +211,7 @@ mod durable_impl {
 
     pub struct DurableChatStream<Impl: ExtendedGuest> {
         state: RefCell<Option<DurableChatStreamState<Impl>>>,
+        subscription: RefCell<Option<Pollable>>,
     }
 
     impl<Impl: ExtendedGuest> DurableChatStream<Impl> {
@@ -220,6 +221,7 @@ mod durable_impl {
                     stream,
                     pollables: Vec::new(),
                 })),
+                subscription: RefCell::new(None),
             }
         }
 
@@ -232,16 +234,23 @@ mod durable_impl {
                     partial_result: Vec::new(),
                     finished: false,
                 })),
+                subscription: RefCell::new(None),
             }
         }
     }
 
     impl<Impl: ExtendedGuest> Drop for DurableChatStream<Impl> {
         fn drop(&mut self) {
-            // Pollables must be dropped first
+            let _ = self.subscription.take();
             match self.state.take() {
-                Some(DurableChatStreamState::Live { mut pollables, .. }) => {
-                    pollables.clear();
+                Some(DurableChatStreamState::Live {
+                    mut pollables,
+                    stream,
+                }) => {
+                    with_persistence_level(PersistenceLevel::PersistNothing, move || {
+                        pollables.clear();
+                        drop(stream);
+                    });
                 }
                 Some(DurableChatStreamState::Replay { mut pollables, .. }) => {
                     pollables.clear();
@@ -354,10 +363,14 @@ mod durable_impl {
         }
 
         fn blocking_get_next(&self) -> Vec<StreamEvent> {
-            let pollable = self.subscribe();
+            let mut subscription = self.subscription.borrow_mut();
+            if subscription.is_none() {
+                *subscription = Some(self.subscribe());
+            }
+            let subscription = subscription.as_mut().unwrap();
             let mut result = Vec::new();
             loop {
-                pollable.block();
+                subscription.block();
                 match self.get_next() {
                     Some(events) => {
                         result.extend(events);
