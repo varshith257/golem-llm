@@ -25,8 +25,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 wit-bindgen-rt = { workspace = true }
 
-aws-sigv4 = "0.5"
-http = "0.2"
+hmac             = "0.12.1"
+sha2             = "0.10.7"
+hex              = "0.4.3"
+chrono           = "0.4.26"
+base64           = "0.21.2"
 
 [package.metadata.component]
 package = "golem:llm-bedrock"

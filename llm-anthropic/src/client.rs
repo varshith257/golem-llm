@@ -11,7 +11,6 @@ use std::fmt::Debug;
 
 const BASE_URL: &str = "https://api.anthropic.com";
 
-/// The Anthropic API client for creating model responses.
 pub struct MessagesApi {
     api_key: String,
     client: Client,
