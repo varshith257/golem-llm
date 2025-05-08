@@ -40,6 +40,9 @@ jobs:
       - name: Install Cargo Make
         run: cargo install --locked --force cargo-make
 
+      - name: Install cargo-component
+        run: cargo install --locked cargo-component
+
       - name: Install Golem CLI
         run: cargo install --locked --force golem-cli@1.2.2-dev.11
 
