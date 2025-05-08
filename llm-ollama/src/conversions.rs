@@ -228,13 +228,11 @@ pub fn tool_results_to_messages(tool_results: Vec<(ToolCall, ToolResult)>) -> Ve
             function: OllamaToolCallFunction {
                 name: tool_call.name.clone(),
                 arguments: serde_json::from_str(&tool_call.arguments_json)
-                    .unwrap_or_else(|_| serde_json::Value::Null),
+                    .unwrap_or(serde_json::Value::Null),
             },
         };
 
-        let mut tool_calls = Vec::new();
-        tool_calls.push(tool_call_obj);
-
+        let tool_calls = vec![tool_call_obj];
         messages.push(OllamaMessage {
             role: Role::Assistant,
             content: String::new(),

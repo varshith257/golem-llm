@@ -4,8 +4,8 @@ use golem_llm::chat_stream::{LlmChatStream, LlmChatStreamState};
 use golem_llm::durability::{DurableLLM, ExtendedGuest};
 use golem_llm::event_source::EventSource;
 use golem_llm::golem::llm::llm::{
-    ChatEvent, ChatStream, Config, ContentPart, Error, FinishReason, Guest, Message, ResponseMetadata, Role,
-    StreamDelta, StreamEvent, ToolCall, ToolResult,
+    ChatEvent, ChatStream, Config, ContentPart, Error, FinishReason, Guest, Message,
+    ResponseMetadata, Role, StreamDelta, StreamEvent, ToolCall, ToolResult,
 };
 use golem_llm::LOGGING_STATE;
 use log::trace;
@@ -64,29 +64,27 @@ impl LlmChatStreamState for OllamaChatStream {
         let json: serde_json::Value = serde_json::from_str(raw)
             .map_err(|err| format!("Failed to deserialize Ollama stream: {err}"))?;
 
-            if json.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
-                let metadata = ResponseMetadata {
-                    finish_reason: Some(FinishReason::Stop),
-                    usage: None,
-                    provider_id: None,
-                    timestamp: None,
-                    provider_metadata_json: None,
-                };
-                return Ok(Some(StreamEvent::Finish(metadata)));
-            }
+        if json.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
+            let metadata = ResponseMetadata {
+                finish_reason: Some(FinishReason::Stop),
+                usage: None,
+                provider_id: None,
+                timestamp: None,
+                provider_metadata_json: None,
+            };
+            return Ok(Some(StreamEvent::Finish(metadata)));
+        }
 
         let ollama_response = serde_json::from_value(json.clone())
             .map_err(|err| format!("Failed to parse Ollama response: {err}"))?;
 
         match process_response(ollama_response) {
             ChatEvent::Message(message) => {
-                if let Some(content) = message.content.first() {
-                    if let ContentPart::Text(text) = content {
-                        return Ok(Some(StreamEvent::Delta(StreamDelta {
-                            content: Some(vec![ContentPart::Text(text.clone())]),
-                            tool_calls: None,
-                        })));
-                    }
+                if let Some(ContentPart::Text(text)) = message.content.first() {
+                    return Ok(Some(StreamEvent::Delta(StreamDelta {
+                        content: Some(vec![ContentPart::Text(text.clone())]),
+                        tool_calls: None,
+                    })));
                 }
                 Ok(None)
             }
