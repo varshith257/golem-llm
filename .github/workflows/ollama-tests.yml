@@ -34,6 +34,9 @@ jobs:
           toolchain: stable
           override: true
 
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+  
       - name: Install Cargo Make
         run: cargo install --locked --force cargo-make
 
