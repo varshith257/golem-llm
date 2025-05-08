@@ -1,53 +1,67 @@
-name: Ollama Tests
+name: CI
 
 on:
   push:
-    branches: [ main ]
+    tags:
+      - "v*.*.*"
+    branches:
+      - main
   pull_request:
-    branches: [ main ]
-  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  ollama-test:
+  ollama-tests:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Rust
-      uses: actions/setup-rust@v1
-      with:
-        rust-version: stable
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-is
 
-    - name: Install Cargo Make
-      run: cargo install cargo-make
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
 
-    - name: Install Golem CLI
-      run: cargo install --locked --force golem-cli@1.2.2-dev.11
+      - name: Install Cargo Make
+        run: cargo install cargo-make
 
-    - name: Install WAC CLI
-      run: cargo install --locked --force wac-cli
+      - name: Install Golem CLI
+        run: cargo install --locked --force golem-cli@1.2.2-dev.11
 
-    - name: Build Ollama components
-      run: cargo make build-test-components
+      - name: Install WAC CLI
+        run: cargo install --locked --force wac-cli
 
-    - name: Build Golem app with ollama-debug profile
-      working-directory: test
-      run: |
-        golem-cli app clean
-        golem-cli app build -b ollama-debug
+      - name: Build Ollama components
+        run: cargo make build-test-components
 
-    - name: Run all Ollama guest tests
-      working-directory: test
-      run: |
-        for TEST_FN in test1 test2 test3 test4 test5 test6; do
-          echo ""
-          echo "🚀 Running $TEST_FN..."
-          golem-cli test --component test:llm --profile ollama-debug --function $TEST_FN \
-            || { echo "❌ $TEST_FN FAILED"; exit 1; }
-          echo "✅ $TEST_FN PASSED"
-        done
+      - name: Build Golem app with ollama-debug profile
+        working-directory: test
+        run: |
+          golem-cli app clean
+          golem-cli app build -b ollama-debug
 
-    - name: All tests passed
-      run: echo "🎉 All Ollama tests completed successfully!"
+      - name: Run all Ollama guest tests
+        working-directory: test
+        run: |
+          for TEST_FN in test1 test2 test3 test4 test5 test6; do
+            echo ""
+            echo "🚀 Running $TEST_FN..."
+            golem-cli test --component test:llm --profile ollama-debug --function $TEST_FN \
+              || { echo "❌ $TEST_FN FAILED"; exit 1; }
+            echo "✅ $TEST_FN PASSED"
+          done
+
+      - name: All tests passed
+        run: echo "🎉 All Ollama tests completed successfully!"
