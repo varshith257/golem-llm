@@ -1,12 +1,11 @@
-use crate::client::{OllamaApi, OllamaChatRequest, OllamaChatResponse};
-use crate::conversions::{messages_to_ollama_request, process_ollama_response};
+use crate::client::{OllamaApi, OllamaChatRequest};
+use crate::conversions::{messages_to_request, process_response, tool_results_to_messages};
 use golem_llm::chat_stream::{LlmChatStream, LlmChatStreamState};
-use golem_llm::config::with_config_key;
 use golem_llm::durability::{DurableLLM, ExtendedGuest};
 use golem_llm::event_source::EventSource;
 use golem_llm::golem::llm::llm::{
-    ChatEvent, ChatStream, Config, ContentPart, Error, ErrorCode, Guest, Message, StreamDelta,
-    StreamEvent, ToolCall, ToolResult,
+    ChatEvent, ChatStream, Config, ContentPart, Error, FinishReason, Guest, Message, ResponseMetadata, Role,
+    StreamDelta, StreamEvent, ToolCall, ToolResult,
 };
 use golem_llm::LOGGING_STATE;
 use log::trace;
@@ -15,11 +14,10 @@ use std::cell::{Ref, RefCell, RefMut};
 mod client;
 mod conversions;
 
-pub struct OllamaChatStream {
+struct OllamaChatStream {
     stream: RefCell<Option<EventSource>>,
     failure: Option<Error>,
     finished: RefCell<bool>,
-    response_metadata: RefCell<ResponseMetadata>,
 }
 
 impl OllamaChatStream {
@@ -28,13 +26,6 @@ impl OllamaChatStream {
             stream: RefCell::new(Some(stream)),
             failure: None,
             finished: RefCell::new(false),
-            response_metadata: RefCell::new(ResponseMetadata {
-                finish_reason: None,
-                usage: None,
-                provider_id: None,
-                timestamp: None,
-                provider_metadata_json: None,
-            }),
         })
     }
 
@@ -43,13 +34,6 @@ impl OllamaChatStream {
             stream: RefCell::new(None),
             failure: Some(error),
             finished: RefCell::new(false),
-            response_metadata: RefCell::new(ResponseMetadata {
-                finish_reason: None,
-                usage: None,
-                provider_id: None,
-                timestamp: None,
-                provider_metadata_json: None,
-            }),
         })
     }
 }
@@ -69,44 +53,73 @@ impl LlmChatStreamState for OllamaChatStream {
 
     fn stream(&self) -> Ref<Option<EventSource>> {
         self.stream.borrow()
-     }
+    }
 
-     fn stream_mut(&self) -> RefMut<Option<EventSource>> {
+    fn stream_mut(&self) -> RefMut<Option<EventSource>> {
         self.stream.borrow_mut()
     }
 
-
     fn decode_message(&self, raw: &str) -> Result<Option<StreamEvent>, String> {
-        trace!("Received raw Ollama response: {raw}");
-        let response: OllamaChatResponse = serde_json::from_str(raw)
-            .map_err(|err| format!("Failed to deserialize Ollama response: {err}"))?;
+        trace!("Received raw Ollama stream event: {raw}");
+        let json: serde_json::Value = serde_json::from_str(raw)
+            .map_err(|err| format!("Failed to deserialize Ollama stream: {err}"))?;
 
-        let event = process_ollama_response(response);
-        Ok(Some(StreamEvent::ChatEvent(event)))
+            if json.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
+                let metadata = ResponseMetadata {
+                    finish_reason: Some(FinishReason::Stop),
+                    usage: None,
+                    provider_id: None,
+                    timestamp: None,
+                    provider_metadata_json: None,
+                };
+                return Ok(Some(StreamEvent::Finish(metadata)));
+            }
+
+        let ollama_response = serde_json::from_value(json.clone())
+            .map_err(|err| format!("Failed to parse Ollama response: {err}"))?;
+
+        match process_response(ollama_response) {
+            ChatEvent::Message(message) => {
+                if let Some(content) = message.content.first() {
+                    if let ContentPart::Text(text) = content {
+                        return Ok(Some(StreamEvent::Delta(StreamDelta {
+                            content: Some(vec![ContentPart::Text(text.clone())]),
+                            tool_calls: None,
+                        })));
+                    }
+                }
+                Ok(None)
+            }
+            ChatEvent::ToolRequest(tool_calls) => Ok(Some(StreamEvent::Delta(StreamDelta {
+                content: None,
+                tool_calls: Some(tool_calls),
+            }))),
+            ChatEvent::Error(err) => Ok(Some(StreamEvent::Error(err))),
+        }
     }
 }
 
 struct OllamaComponent;
 
 impl OllamaComponent {
-    fn request(client: OllamaApi, request: OllamaChatRequest) -> ChatEvent {
-        match client.chat(request) {
-            Ok(response) => process_ollama_response(response),
+    fn request(client: &OllamaApi, request: OllamaChatRequest) -> ChatEvent {
+        match client.send_messages(request) {
+            Ok(response) => process_response(response),
             Err(err) => ChatEvent::Error(err),
         }
     }
 
     fn streaming_request(
-        client: OllamaApi,
-        request: OllamaChatRequest,
+        client: &OllamaApi,
+        mut request: OllamaChatRequest,
     ) -> LlmChatStream<OllamaChatStream> {
-        match client.stream_chat(request) {
-            Ok(stream) => OllamaChatStream::new(client, request.config, request.messages),
+        request.stream = true;
+        match client.stream_send_messages(request) {
+            Ok(stream) => OllamaChatStream::new(stream),
             Err(err) => OllamaChatStream::failed(err),
         }
     }
 }
-
 
 impl Guest for OllamaComponent {
     type ChatStream = LlmChatStream<OllamaChatStream>;
@@ -115,25 +128,30 @@ impl Guest for OllamaComponent {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
         let client = OllamaApi::new();
-        match messages_to_ollama_request(messages, config) {
-            Ok(request) => Self::request(client, request),
+        match messages_to_request(messages, config) {
+            Ok(request) => Self::request(&client, request),
             Err(err) => ChatEvent::Error(err),
         }
     }
 
     fn continue_(
         messages: Vec<Message>,
-        _tool_results: Vec<(ToolCall, ToolResult)>,
+        tool_results: Vec<(ToolCall, ToolResult)>,
         config: Config,
     ) -> ChatEvent {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
+
         let client = OllamaApi::new();
-        match messages_to_ollama_request(messages, config) {
-            Ok(request) => Self::request(client, request),
+        match messages_to_request(messages, config) {
+            Ok(mut request) => {
+                request
+                    .messages
+                    .extend(tool_results_to_messages(tool_results));
+                Self::request(&client, request)
+            }
             Err(err) => ChatEvent::Error(err),
         }
     }
-
 
     fn stream(messages: Vec<Message>, config: Config) -> ChatStream {
         ChatStream::new(Self::unwrapped_stream(messages, config))
@@ -141,15 +159,12 @@ impl Guest for OllamaComponent {
 }
 
 impl ExtendedGuest for OllamaComponent {
-    fn unwrapped_stream(
-        messages: Vec<Message>,
-        config: Config,
-    ) -> LlmChatStream<OllamaChatStream> {
+    fn unwrapped_stream(messages: Vec<Message>, config: Config) -> LlmChatStream<OllamaChatStream> {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
         let client = OllamaApi::new();
-        match messages_to_ollama_request(messages, config) {
-            Ok(request) => Self::streaming_request(client, request),
+        match messages_to_request(messages, config) {
+            Ok(request) => Self::streaming_request(&client, request),
             Err(err) => OllamaChatStream::failed(err),
         }
     }
