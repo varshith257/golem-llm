@@ -35,7 +35,7 @@ jobs:
           override: true
 
       - name: Install Cargo Make
-        run: cargo install cargo-make
+        run: cargo install --locked --force cargo-make
 
       - name: Install Golem CLI
         run: cargo install --locked --force golem-cli@1.2.2-dev.11
