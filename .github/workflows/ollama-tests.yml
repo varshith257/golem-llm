@@ -1,5 +1,4 @@
 name: CI
-
 on:
   push:
     tags:
@@ -7,17 +6,14 @@ on:
     branches:
       - main
   pull_request:
-
 env:
   CARGO_TERM_COLOR: always
-
+  OLLAMA_API_BASE: "http://localhost:11434"
 jobs:
   ollama-tests:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/cache@v3
         with:
           path: |
@@ -26,48 +22,141 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-is
-
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
-
+      
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-  
-      - name: Install Cargo Make
-        run: cargo install --locked --force cargo-make
-
-      - name: Install cargo-component
-        run: cargo install --locked cargo-component
-
-      - name: Install Golem CLI
-        run: cargo install --locked --force golem-cli@1.2.2-dev.11
-
-      - name: Install WAC CLI
-        run: cargo install --locked --force wac-cli
-
+      
+      # Cache cargo-installed binaries (golem-cli, wac, cargo-make, etc.)
+      - name: Cache Cargo Binaries
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/bin/
+          key: ${{ runner.os }}-cargo-bin-v1
+      
+      - name: Install Cargo Make (if missing)
+        run: |
+          if ! command -v cargo-make &> /dev/null; then
+            cargo install --locked --force cargo-make
+          fi
+      
+      - name: Install cargo-component (if missing)
+        run: |
+          if ! command -v cargo-component &> /dev/null; then
+            cargo install --locked cargo-component
+          fi
+      
+      - name: Install Golem CLI (if missing)
+        run: |
+          if ! command -v golem-cli &> /dev/null; then
+            cargo install --locked --force golem-cli@1.2.2-dev.11
+          fi
+      
+      - name: Install WAC CLI (if missing)
+        run: |
+          if ! command -v wac &> /dev/null; then
+            cargo install --locked --force wac-cli
+          fi
+      
+      - name: Setup Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          # Start Ollama and log output to a file for debugging
+          ollama serve &> ollama.log &
+          echo "Waiting for Ollama to start up..."
+          sleep 20
+      
+      - name: Verify Ollama is running
+        run: |
+          curl -s http://localhost:11434/api/version || { 
+            echo "❌ Ollama service not responding"
+            echo "Ollama logs:"
+            cat ollama.log
+            exit 1
+          }
+          echo "✅ Ollama service is up and running"
+      
+      - name: Pull required models for tests
+        timeout-minutes: 15
+        run: |
+          echo "Pulling llama2 model..."
+          ollama pull llama2 || { 
+            echo "❌ Failed to pull llama2 model"
+            cat ollama.log
+            exit 1
+          }
+          
+          echo "Pulling llava model..."
+          ollama pull llava || { 
+            echo "❌ Failed to pull llava model"
+            cat ollama.log
+            exit 1
+          }
+          
+          echo "Verifying models are available..."
+          ollama list | grep llama2 || { echo "❌ llama2 model not found"; exit 1; }
+          ollama list | grep llava || { echo "❌ llava model not found"; exit 1; }
+          echo "✅ All required models are available"
+      
       - name: Build Ollama components
         run: cargo make build-test-components
-
+      
       - name: Build Golem app with ollama-debug profile
         working-directory: test
         run: |
-          golem-cli app clean
-          golem-cli app build -b ollama-debug
-
-      - name: Run all Ollama guest tests
+          golem-cli clean
+          golem-cli build -b ollama-debug
+      
+      - name: List available components
+        working-directory: test
+        run: golem-cli list
+      
+      # Deploy and run all tests using the correct worker-based approach
+      - name: Deploy app and run all tests
         working-directory: test
         run: |
+          echo "🚀 Deploying app with ollama-debug profile..."
+          APP_ID=$(golem-cli deploy --profile ollama-debug | grep -oP 'App ID: \K[^ ]+')
+          echo "✅ App deployed with ID: $APP_ID"
+          
+          # Run all tests on the deployed app
           for TEST_FN in test1 test2 test3 test4 test5 test6; do
             echo ""
             echo "🚀 Running $TEST_FN..."
-            golem-cli test --component test:llm --profile ollama-debug --function $TEST_FN \
-              || { echo "❌ $TEST_FN FAILED"; exit 1; }
+            
+            # Create a new worker for each test
+            echo "Creating worker for test:llm component..."
+            WORKER_ID=$(golem-cli worker create $APP_ID test:llm | grep -oP 'Worker ID: \K[^ ]+')
+            echo "Worker created with ID: $WORKER_ID"
+            
+            # Invoke the test function on the worker
+            echo "Invoking $TEST_FN function..."
+            golem-cli worker invoke $WORKER_ID $TEST_FN || { 
+              echo "❌ $TEST_FN FAILED"
+              golem-cli worker stop $WORKER_ID
+              exit 1
+            }
+            
             echo "✅ $TEST_FN PASSED"
+            
+            # Clean up worker after test
+            echo "Stopping worker $WORKER_ID..."
+            golem-cli worker stop $WORKER_ID
           done
-
+          
+          # Clean up the app
+          echo "Cleaning up app $APP_ID..."
+          golem-cli app stop $APP_ID
+      
+      - name: Display Ollama logs on failure
+        if: failure()
+        run: cat ollama.log
+      
       - name: All tests passed
         run: echo "🎉 All Ollama tests completed successfully!"
