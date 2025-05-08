@@ -64,6 +64,7 @@ args = ["build", "-p", "golem-llm-openrouter", "--no-default-features"]
 dependencies = [
     "build-anthropic",
     "build-grok",
+    "buid-ollama"
     "build-openai",
     "build-openrouter",
 ]
@@ -166,8 +167,8 @@ args = [
 [tasks.release-build]
 dependencies = [
     "release-build-anthropic",
-    "release-build-ollama",
     "release-build-grok",
+    "release-build-ollama",
     "release-build-openai",
     "release-build-openrouter",
 ]
@@ -222,6 +223,7 @@ dependencies = ["wit-update"]
 #    "llm/wit/deps/golem-llm/golem-llm.wit",
 #    "llm-anthropic/wit/deps/golem-llm/golem-llm.wit",
 #    "llm-grok/wit/deps/golem-llm/golem-llm.wit",
+#    "llm-ollama/wit/deps/golem-llm/golem-llm.wit",
 #    "llm-openai/wit/deps/golem-llm/golem-llm.wit",
 #    "llm-openrouter/wit/deps/golem-llm/golem-llm.wit",
 #] } }
