@@ -1,0 +1,53 @@
+name: Ollama Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  ollama-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: actions/setup-rust@v1
+      with:
+        rust-version: stable
+
+    - name: Install Cargo Make
+      run: cargo install cargo-make
+
+    - name: Install Golem CLI
+      run: cargo install --locked --force golem-cli@1.2.2-dev.11
+
+    - name: Install WAC CLI
+      run: cargo install --locked --force wac-cli
+
+    - name: Build Ollama components
+      run: cargo make build-test-components
+
+    - name: Build Golem app with ollama-debug profile
+      working-directory: test
+      run: |
+        golem-cli app clean
+        golem-cli app build -b ollama-debug
+
+    - name: Run all Ollama guest tests
+      working-directory: test
+      run: |
+        for TEST_FN in test1 test2 test3 test4 test5 test6; do
+          echo ""
+          echo "🚀 Running $TEST_FN..."
+          golem-cli test --component test:llm --profile ollama-debug --function $TEST_FN \
+            || { echo "❌ $TEST_FN FAILED"; exit 1; }
+          echo "✅ $TEST_FN PASSED"
+        done
+
+    - name: All tests passed
+      run: echo "🎉 All Ollama tests completed successfully!"
