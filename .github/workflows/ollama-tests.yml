@@ -14,149 +14,166 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/cache@v3
+      
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-deps-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-deps-
       
+      - name: Cache CLI tools
+        id: cache-cli-tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: ${{ runner.os }}-cli-tools-${{ hashFiles('./ci-tool-versions.txt', '**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cli-tools-
+      
+      - name: Ensure tool versions file exists
+        run: |
+          if [ ! -f "./ci-tool-versions.txt" ]; then
+            cat > ./ci-tool-versions.txt << EOF
+            cargo-make: stable
+            cargo-component: stable
+            golem-cli: 1.2.2-dev.11
+            wac-cli: stable
+            golem-test-framework: stable
+            EOF
+          fi
+          
       - name: Setup Rust
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
-      
+          target: wasm32-wasip1
+          
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       
-      # Cache cargo-installed binaries (golem-cli, wac, cargo-make, etc.)
-      - name: Cache Cargo Binaries
-        uses: actions/cache@v3
+      - name: Install CLI tools
+        if: steps.cache-cli-tools.outputs.cache-hit != 'true'
+        run: |
+          echo "Installing cargo-make..."
+          cargo install --locked cargo-make
+          
+          echo "Installing cargo-component..."
+          cargo install --locked cargo-component
+          
+          echo "Installing golem-cli..."
+          cargo install --locked golem-cli@1.2.2-dev.11
+          
+          echo "Installing wac-cli..."
+          cargo install --locked wac-cli
+          
+          echo "Installing golem-test-framework..."
+          cargo install --locked golem-test-framework
+          
+          echo "✅ All CLI tools installed successfully"
+      
+      - name: Verify CLI tools
+        run: |
+          cargo-make --version
+          cargo-component --version
+          golem-cli --version
+          wac --version
+          golem-test-framework --version
+      
+      - name: Cache Ollama models
+        id: cache-ollama-models
+        uses: actions/cache@v4
         with:
-          path: ~/.cargo/bin/
-          key: ${{ runner.os }}-cargo-bin-v1
+          path: ~/.ollama
+          key: ${{ runner.os }}-ollama-models-llama2-llava
+          restore-keys: |
+            ${{ runner.os }}-ollama-models-
       
-      - name: Install Cargo Make (if missing)
+      - name: Start Ollama Docker
         run: |
-          if ! command -v cargo-make &> /dev/null; then
-            cargo install --locked --force cargo-make
-          fi
-      
-      - name: Install cargo-component (if missing)
-        run: |
-          if ! command -v cargo-component &> /dev/null; then
-            cargo install --locked cargo-component
-          fi
-      
-      - name: Install Golem CLI (if missing)
-        run: |
-          if ! command -v golem-cli &> /dev/null; then
-            cargo install --locked --force golem-cli@1.2.2-dev.11
-          fi
-      
-      - name: Install WAC CLI (if missing)
-        run: |
-          if ! command -v wac &> /dev/null; then
-            cargo install --locked --force wac-cli
-          fi
-      
-      - name: Setup Ollama
-        run: |
-          curl -fsSL https://ollama.com/install.sh | sh
-          # Start Ollama and log output to a file for debugging
-          ollama serve &> ollama.log &
-          echo "Waiting for Ollama to start up..."
+          mkdir -p ~/.ollama
+          docker run -d --name ollama-test \
+            -p 11434:11434 \
+            -v ~/.ollama:/root/.ollama \
+            ollama/ollama:latest
+          echo "Waiting for Ollama container to initialize..."
           sleep 20
       
-      - name: Verify Ollama is running
+      - name: Verify Ollama container
         run: |
-          curl -s http://localhost:11434/api/version || { 
+          curl -s http://localhost:11434/api/version || {
             echo "❌ Ollama service not responding"
-            echo "Ollama logs:"
-            cat ollama.log
+            echo "Ollama container logs:"
+            docker logs ollama-test
             exit 1
           }
-          echo "✅ Ollama service is up and running"
+          echo "✅ Ollama container is running correctly"
       
-      - name: Pull required models for tests
-        timeout-minutes: 15
+      - name: Pull required Ollama models
         run: |
-          echo "Pulling llama2 model..."
-          ollama pull llama2 || { 
-            echo "❌ Failed to pull llama2 model"
-            cat ollama.log
-            exit 1
-          }
+          echo "Checking for cached models..."
+          MODELS_CACHED=$(curl -s http://localhost:11434/api/tags | grep -c -E 'llama2|llava' || echo "0")
           
-          echo "Pulling llava model..."
-          ollama pull llava || { 
-            echo "❌ Failed to pull llava model"
-            cat ollama.log
-            exit 1
-          }
+          if [ "$MODELS_CACHED" -lt "2" ]; then
+            echo "Some models missing, pulling required models..."
+            
+            if ! curl -s http://localhost:11434/api/tags | grep -q "llama2"; then
+              echo "Pulling llama2 model..."
+              curl -X POST http://localhost:11434/api/pull -d '{"name":"llama2"}'
+            else
+              echo "llama2 model already available."
+            fi
+            
+            if ! curl -s http://localhost:11434/api/tags | grep -q "llava"; then
+              echo "Pulling llava model..."
+              curl -X POST http://localhost:11434/api/pull -d '{"name":"llava"}'
+            else
+              echo "llava model already available."
+            fi
+          else
+            echo "All models already cached."
+          fi
           
           echo "Verifying models are available..."
-          ollama list | grep llama2 || { echo "❌ llama2 model not found"; exit 1; }
-          ollama list | grep llava || { echo "❌ llava model not found"; exit 1; }
+          curl -s http://localhost:11434/api/tags | grep llama2 || { echo "❌ llama2 model not found"; exit 1; }
+          curl -s http://localhost:11434/api/tags | grep llava || { echo "❌ llava model not found"; exit 1; }
           echo "✅ All required models are available"
       
-      - name: Build Ollama components
-        run: cargo make build-test-components
-      
-      - name: Build Golem app with ollama-debug profile
-        working-directory: test
+      - name: Build test components
         run: |
-          golem-cli clean
-          golem-cli build -b ollama-debug
+          echo "Building test components..."
+          cargo make build-test-components
+          echo "✅ Test components built successfully"
       
-      - name: List available components
-        working-directory: test
-        run: golem-cli list
-      
-      # Deploy and run all tests using the correct worker-based approach
-      - name: Deploy app and run all tests
-        working-directory: test
+      - name: Compose with wac (durable)
         run: |
-          echo "🚀 Deploying app with ollama-debug profile..."
-          APP_ID=$(golem-cli deploy --profile ollama-debug | grep -oP 'App ID: \K[^ ]+')
-          echo "✅ App deployed with ID: $APP_ID"
-          
-          # Run all tests on the deployed app
-          for TEST_FN in test1 test2 test3 test4 test5 test6; do
-            echo ""
-            echo "🚀 Running $TEST_FN..."
-            
-            # Create a new worker for each test
-            echo "Creating worker for test:llm component..."
-            WORKER_ID=$(golem-cli worker create $APP_ID test:llm | grep -oP 'Worker ID: \K[^ ]+')
-            echo "Worker created with ID: $WORKER_ID"
-            
-            # Invoke the test function on the worker
-            echo "Invoking $TEST_FN function..."
-            golem-cli worker invoke $WORKER_ID $TEST_FN || { 
-              echo "❌ $TEST_FN FAILED"
-              golem-cli worker stop $WORKER_ID
-              exit 1
-            }
-            
-            echo "✅ $TEST_FN PASSED"
-            
-            # Clean up worker after test
-            echo "Stopping worker $WORKER_ID..."
-            golem-cli worker stop $WORKER_ID
-          done
-          
-          # Clean up the app
-          echo "Cleaning up app $APP_ID..."
-          golem-cli app stop $APP_ID
+          echo "Composing WASM components (durable)..."
+          wac plug --plug ./target/wasm32-wasip1/debug/golem_llm_ollama.wasm \
+                   ./target/wasm32-wasip1/debug/test_llm.wasm \
+                   -o ./target/wasm32-wasip1/debug/test_llm_composed.wasm
+          echo "✅ Components composed successfully"
       
-      - name: Display Ollama logs on failure
-        if: failure()
-        run: cat ollama.log
+      - name: Run tests via golem-test-framework
+        run: |
+          echo "Running tests via golem-test-framework..."
+          golem-test-framework run \
+            --wasm ./target/wasm32-wasip1/debug/test_llm_composed.wasm \
+            --profile ollama-debug \
+            --assert-nonempty
+          echo "✅ All tests passed successfully"
+      
+      - name: Stop Ollama container
+        if: always()
+        run: |
+          echo "Cleaning up Ollama container..."
+          docker rm -f ollama-test
+          echo "✅ Cleanup completed"
       
       - name: All tests passed
         run: echo "🎉 All Ollama tests completed successfully!"
