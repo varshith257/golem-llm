@@ -39,7 +39,7 @@ jobs:
       - name: Ensure tool versions file exists
         run: |
           if [ ! -f "./ci-tool-versions.txt" ]; then
-            cat > ./ci-tool-versions.txt << EOF
+            cat > ./ci-tool-versions.txt << 'EOF'
             cargo-make: stable
             cargo-component: stable
             golem-cli: 1.2.2-dev.11
