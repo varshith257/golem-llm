@@ -39,13 +39,11 @@ jobs:
       - name: Ensure tool versions file exists
         run: |
           if [ ! -f "./ci-tool-versions.txt" ]; then
-            cat > ./ci-tool-versions.txt << 'EOF'
-            cargo-make: stable
-            cargo-component: stable
-            golem-cli: 1.2.2-dev.11
-            wac-cli: stable
-            golem-test-framework: stable
-            EOF
+            echo "cargo-make: stable" > ./ci-tool-versions.txt
+            echo "cargo-component: stable" >> ./ci-tool-versions.txt
+            echo "golem-cli: 1.2.2-dev.11" >> ./ci-tool-versions.txt
+            echo "wac-cli: stable" >> ./ci-tool-versions.txt
+            echo "golem-test-framework: stable" >> ./ci-tool-versions.txt
           fi
           
       - name: Setup Rust
