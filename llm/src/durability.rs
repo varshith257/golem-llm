@@ -1,4 +1,5 @@
 use crate::golem::llm::llm::{Config, ContentPart, Guest, Message, Role, StreamDelta};
+use golem_rust::wasm_rpc::Pollable;
 use std::marker::PhantomData;
 
 /// Wraps an LLM implementation with custom durability
@@ -56,6 +57,8 @@ pub trait ExtendedGuest: Guest + 'static {
         });
         extended_messages
     }
+
+    fn subscribe(stream: &Self::ChatStream) -> Pollable;
 }
 
 /// When the durability feature flag is off, wrapping with `DurableLLM` is just a passthrough
@@ -237,6 +240,22 @@ mod durable_impl {
                 subscription: RefCell::new(None),
             }
         }
+
+        fn subscribe(&self) -> Pollable {
+            let mut state = self.state.borrow_mut();
+            match &mut *state {
+                Some(DurableChatStreamState::Live { stream, .. }) => Impl::subscribe(stream),
+                Some(DurableChatStreamState::Replay { pollables, .. }) => {
+                    let lazy_pollable = LazyInitializedPollable::new();
+                    let pollable = lazy_pollable.subscribe();
+                    pollables.push(lazy_pollable);
+                    pollable
+                }
+                None => {
+                    unreachable!()
+                }
+            }
+        }
     }
 
     impl<Impl: ExtendedGuest> Drop for DurableChatStream<Impl> {
@@ -298,7 +317,7 @@ mod durable_impl {
                                     );
 
                                     for lazy_initialized_pollable in pollables {
-                                        lazy_initialized_pollable.set(stream.subscribe());
+                                        lazy_initialized_pollable.set(Impl::subscribe(&stream));
                                     }
 
                                     let next = stream.get_next();
@@ -377,22 +396,6 @@ mod durable_impl {
                         break result;
                     }
                     None => continue,
-                }
-            }
-        }
-
-        fn subscribe(&self) -> Pollable {
-            let mut state = self.state.borrow_mut();
-            match &mut *state {
-                Some(DurableChatStreamState::Live { stream, .. }) => stream.subscribe(),
-                Some(DurableChatStreamState::Replay { pollables, .. }) => {
-                    let lazy_pollable = LazyInitializedPollable::new();
-                    let pollable = lazy_pollable.subscribe();
-                    pollables.push(lazy_pollable);
-                    pollable
-                }
-                None => {
-                    unreachable!()
                 }
             }
         }

@@ -119,6 +119,45 @@ implemented test functions are demonstrating the following:
 | `test5`       | Using an image in the prompt                                                               |
 | `test6`       | Demonstrates that the streaming response is continued in case of a crash (with Golem only) |
 
+### Running the examples
+
+To run the examples first you need a running Golem instance. This can be Golem Cloud or the single-executable `golem`
+binary
+started with `golem server run`.
+
+**NOTE**: `golem-llm` requires the latest (unstable) version of Golem currently. It's going to work with the next public
+stable release 1.2.2.
+
+Then build and deploy the _test application_. Select one of the following profiles to choose which provider to use:
+| Profile Name | Description |
+|--------------|-----------------------------------------------------------------------------------------------|
+| `anthropic-debug` | Uses the Anthropic LLM implementation and compiles the code in debug profile |
+| `anthropic-release` | Uses the Anthropic LLM implementation and compiles the code in release profile |
+| `grok-debug` | Uses the Grok LLM implementation and compiles the code in debug profile |
+| `grok-release` | Uses the Grok LLM implementation and compiles the code in release profile |
+| `openai-debug` | Uses the OpenAI LLM implementation and compiles the code in debug profile |
+| `openai-release` | Uses the OpenAI LLM implementation and compiles the code in release profile |
+| `openrouter-debug` | Uses the OpenRouter LLM implementation and compiles the code in debug profile |
+| `openrouter-release` | Uses the OpenRouter LLM implementation and compiles the code in release profile |
+
+```bash
+cd test
+golem app build -b openai-debug
+golem app deploy -b openai-debug
+```
+
+Depending on the provider selected, an environment variable has to be set for the worker to be started, containing the API key for the given provider:
+
+```bash
+golem worker new test:llm/debug --env OPENAI_API_KEY=xxx --env GOLEM_LLM_LOG=trace
+```
+
+Then you can invoke the test functions on this worker:
+
+```bash
+golem worker invoke test:llm/debug test1 --stream 
+```
+
 ## Development
 
 This repository uses [cargo-make](https://github.com/sagiegurari/cargo-make) to automate build tasks.

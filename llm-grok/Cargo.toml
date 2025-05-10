@@ -33,7 +33,6 @@ generate_unused_types = true
 
 [package.metadata.component.bindings.with]
 "golem:llm/llm@1.0.0" = "golem_llm::golem::llm::llm"
-"wasi:io/poll@0.2.0" = "golem_rust::wasm_rpc::wasi::io::poll"
 
 [package.metadata.component.target]
 path = "wit"
