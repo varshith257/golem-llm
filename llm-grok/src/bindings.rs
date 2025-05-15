@@ -2,11 +2,13 @@
 // Options used:
 //   * runtime_path: "wit_bindgen_rt"
 //   * with "golem:llm/llm@1.0.0" = "golem_llm::golem::llm::llm"
+//   * with "wasi:io/poll@0.2.0" = "golem_rust::wasm_rpc::wasi::io::poll"
 //   * generate_unused_types
 use golem_llm::golem::llm::llm as __with_name0;
 #[cfg(target_arch = "wasm32")]
 #[link_section = "component-type:wit-bindgen:0.36.0:golem:llm-grok@1.0.0:llm-library:encoded world"]
 #[doc(hidden)]
+
 pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 1663] = *b"\
 \0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xfd\x0b\x01A\x02\x01\
 A\x02\x01BJ\x01m\x04\x04user\x09assistant\x06system\x04tool\x04\0\x04role\x03\0\0\

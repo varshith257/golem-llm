@@ -2,6 +2,7 @@
 // Options used:
 //   * runtime_path: "wit_bindgen_rt"
 //   * with "golem:llm/llm@1.0.0" = "golem_llm::golem::llm::llm"
+//   * with "wasi:io/poll@0.2.0" = "golem_rust::wasm_rpc::wasi::io::poll"
 //   * generate_unused_types
 use golem_llm::golem::llm::llm as __with_name0;
 #[cfg(target_arch = "wasm32")]
