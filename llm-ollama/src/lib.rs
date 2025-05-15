@@ -8,6 +8,7 @@ use golem_llm::golem::llm::llm::{
     ResponseMetadata, Role, StreamDelta, StreamEvent, ToolCall, ToolResult,
 };
 use golem_llm::LOGGING_STATE;
+use golem_rust::wasm_rpc::Pollable;
 use log::trace;
 use std::cell::{Ref, RefCell, RefMut};
 
@@ -245,6 +246,10 @@ impl ExtendedGuest for OllamaComponent {
         });
 
         extended_messages
+    }
+
+    fn subscribe(stream: &Self::ChatStream) -> Pollable {
+        stream.subscribe()
     }
 }
 
