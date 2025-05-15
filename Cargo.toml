@@ -9,6 +9,7 @@ lto = true
 opt-level = 's'
 
 [workspace.dependencies]
+base64 = "0.22.1"
 golem-rust = "1.5.3"
 log = "0.4.27"
 reqwest = { git = "https://github.com/golemcloud/reqwest", branch = "update-april-2025", features = ["json"] }

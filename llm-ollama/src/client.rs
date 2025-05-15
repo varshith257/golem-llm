@@ -12,8 +12,6 @@ use std::fmt::Debug;
 const DEFAULT_BASE_URL: &str = "http://localhost:11434";
 
 /// The Ollama API client for creating model responses.
-///
-/// Based on https://github.com/ollama/ollama/blob/main/docs/api.md
 pub struct OllamaApi {
     base_url: String,
     client: Client,
@@ -21,7 +19,9 @@ pub struct OllamaApi {
 
 impl OllamaApi {
     pub fn new() -> Self {
-        Self::with_base_url(DEFAULT_BASE_URL.to_string())
+        let base_url =
+            std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string());
+        Self::with_base_url(base_url)
     }
 
     pub fn with_base_url(base_url: String) -> Self {
@@ -29,6 +29,41 @@ impl OllamaApi {
             .build()
             .expect("Failed to initialize HTTP client");
         Self { base_url, client }
+    }
+
+    pub fn image_url_to_base64(&self, url: &str) -> Result<String, Error> {
+        use base64::engine::general_purpose;
+        use base64::Engine;
+
+        let response = self
+            .client
+            .get(url)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .map_err(|err| from_reqwest_error("Failed to download image", err))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(Error {
+                code: error_code_from_status(status),
+                message: format!("Failed to fetch image: {}", status),
+                provider_error_json: None,
+            });
+        }
+
+        let mime_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("image/png")
+            .to_string();
+        let bytes = response
+            .bytes()
+            .map_err(|err| from_reqwest_error("Failed to read image bytes", err))?;
+
+        let encoded = general_purpose::STANDARD.encode(&bytes);
+
+        Ok(format!("data:{};base64,{}", mime_type, encoded))
     }
 
     pub fn send_messages(&self, request: OllamaChatRequest) -> Result<OllamaChatResponse, Error> {
@@ -39,10 +74,16 @@ impl OllamaApi {
 
         let response: Response = self
             .client
-            .request(Method::POST, format!("{}/api/chat", self.base_url))
+            .request(
+                Method::POST,
+                format!("{}/v1/chat/completions", self.base_url),
+            )
             .json(&stream_request)
             .send()
-            .map_err(|err| from_reqwest_error("Request failed", err))?;
+            .map_err(|err| {
+                log::error!("Failed to send HTTP request to Ollama: {err:?}");
+                from_reqwest_error("Request failed", err)
+            })?;
 
         parse_response(response)
     }
@@ -54,7 +95,10 @@ impl OllamaApi {
 
         let response: Response = self
             .client
-            .request(Method::POST, format!("{}/api/chat", self.base_url))
+            .request(
+                Method::POST,
+                format!("{}/v1/chat/completions", self.base_url),
+            )
             .header(
                 reqwest::header::ACCEPT,
                 HeaderValue::from_static("text/event-stream"),
@@ -77,11 +121,23 @@ pub struct OllamaChatRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<OllamaTool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub format: Option<String>,
+    pub tool_choice: Option<ToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub options: Option<RequestOptions>,
+    pub response_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub template: Option<String>,
+    pub temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frequency_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presence_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keep_alive: Option<String>,
     pub stream: bool,
@@ -89,12 +145,32 @@ pub struct OllamaChatRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OllamaMessage {
-    pub role: Role,
-    pub content: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub images: Option<Vec<String>>,
+    pub role: String,
+    #[serde(flatten)]
+    pub content: OllamaMessageContent,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<OllamaToolCall>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum MessageContentPayload {
+    Text { content: String },
+    Array { content: Vec<ContentPart> },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentPart {
+    Text { text: String },
+    ImageUrl { image_url: ImageUrl },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageUrl {
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,18 +189,6 @@ pub struct OllamaFunction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Role {
-    #[serde(rename = "user")]
-    User,
-    #[serde(rename = "assistant")]
-    Assistant,
-    #[serde(rename = "system")]
-    System,
-    #[serde(rename = "tool")]
-    Tool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OllamaToolCall {
     pub id: String,
     pub function: OllamaToolCallFunction,
@@ -137,72 +201,91 @@ pub struct OllamaToolCallFunction {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RequestOptions {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub top_p: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub top_k: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub num_predict: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stop: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repeat_penalty: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub num_ctx: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub seed: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mirostat: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mirostat_eta: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mirostat_tau: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub num_gpu: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub num_thread: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tfs_z: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub penalize_newline: Option<bool>,
+#[serde(untagged)]
+pub enum ToolChoice {
+    String(String),
+    Object {
+        #[serde(rename = "type")]
+        typ: String,
+        function: OllamaFunctionChoice,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OllamaFunctionChoice {
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OllamaErrorResponse {
-    pub error: String,
+    pub error: OllamaError,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OllamaError {
+    pub message: String,
+    #[serde(rename = "type")]
+    pub typ: Option<String>,
+    pub code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OllamaChatResponse {
+    pub id: String,
+    pub object: String,
+    pub created: u64,
     pub model: String,
-    pub created_at: String,
+    pub choices: Vec<OllamaChoice>,
+    pub usage: Option<OllamaUsage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OllamaChoice {
+    pub index: u32,
     pub message: OllamaMessageContent,
-    pub done: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub total_duration: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub load_duration: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt_eval_count: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt_eval_duration: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub eval_count: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub eval_duration: Option<i64>,
+    pub finish_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OllamaMessageContent {
     pub role: String,
-    pub content: String,
+    #[serde(flatten)]
+    pub content: Option<MessageContentPayload>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<OllamaToolCall>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OllamaUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OllamaChatDeltaResponse {
+    pub id: String,
+    pub object: String,
+    pub created: u64,
+    pub model: String,
+    pub choices: Vec<OllamaDeltaChoice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OllamaDeltaChoice {
+    pub index: u32,
+    pub delta: OllamaDeltaMessageContent,
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OllamaDeltaMessageContent {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub images: Option<Vec<String>>,
+    pub role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<OllamaToolCall>>,
 }
 
 fn parse_response<T: DeserializeOwned + Debug>(response: Response) -> Result<T, Error> {
@@ -224,7 +307,7 @@ fn parse_response<T: DeserializeOwned + Debug>(response: Response) -> Result<T, 
 
         Err(Error {
             code: error_code_from_status(status),
-            message: format!("Request failed with {status}: {}", error_body.error),
+            message: format!("Request failed with {status}: {}", error_body.error.message),
             provider_error_json: Some(serde_json::to_string(&error_body).unwrap()),
         })
     }

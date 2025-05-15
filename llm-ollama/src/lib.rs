@@ -1,4 +1,4 @@
-use crate::client::{OllamaApi, OllamaChatRequest};
+use crate::client::{OllamaApi, OllamaChatDeltaResponse, OllamaChatRequest};
 use crate::conversions::{messages_to_request, process_response, tool_results_to_messages};
 use golem_llm::chat_stream::{LlmChatStream, LlmChatStreamState};
 use golem_llm::durability::{DurableLLM, ExtendedGuest};
@@ -61,39 +61,66 @@ impl LlmChatStreamState for OllamaChatStream {
 
     fn decode_message(&self, raw: &str) -> Result<Option<StreamEvent>, String> {
         trace!("Received raw Ollama stream event: {raw}");
-        let json: serde_json::Value = serde_json::from_str(raw)
-            .map_err(|err| format!("Failed to deserialize Ollama stream: {err}"))?;
 
-        if json.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
-            let metadata = ResponseMetadata {
-                finish_reason: Some(FinishReason::Stop),
-                usage: None,
-                provider_id: None,
-                timestamp: None,
-                provider_metadata_json: None,
+        let chunk: OllamaChatDeltaResponse = serde_json::from_str(raw).map_err(|err| {
+            format!("Failed to deserialize Ollama stream chunk : {err} - raw: {raw}")
+        })?;
+
+        let choice = match chunk.choices.first() {
+            Some(c) => c,
+            None => return Ok(None),
+        };
+
+        if let Some(content) = &choice.delta.content {
+            if !content.is_empty() {
+                return Ok(Some(StreamEvent::Delta(StreamDelta {
+                    content: Some(vec![ContentPart::Text(content.clone())]),
+                    tool_calls: None,
+                })));
+            }
+        }
+
+        if let Some(tool_calls) = &choice.delta.tool_calls {
+            if !tool_calls.is_empty() {
+                let golem_tool_calls = tool_calls
+                    .iter()
+                    .map(|tc| ToolCall {
+                        id: tc.id.clone(),
+                        name: tc.function.name.clone(),
+                        arguments_json: tc.function.arguments.to_string(),
+                    })
+                    .collect();
+
+                return Ok(Some(StreamEvent::Delta(StreamDelta {
+                    content: None,
+                    tool_calls: Some(golem_tool_calls),
+                })));
+            }
+        }
+        if let Some(finish_reason) = &choice.finish_reason {
+            let finish_reason_enum = match finish_reason.as_str() {
+                "stop" => FinishReason::Stop,
+                "length" => FinishReason::Length,
+                "tool_calls" => FinishReason::ToolCalls,
+                "content_filter" => FinishReason::ContentFilter,
+                _ => FinishReason::Other,
             };
+
+            let metadata = ResponseMetadata {
+                finish_reason: Some(finish_reason_enum),
+                usage: None,
+                provider_id: Some(chunk.id.clone()),
+                timestamp: Some(chunk.created.to_string()),
+                provider_metadata_json: Some(format!(
+                    r#"{{"id":"{}","created":{}}}"#,
+                    chunk.id, chunk.created
+                )),
+            };
+
             return Ok(Some(StreamEvent::Finish(metadata)));
         }
 
-        let ollama_response = serde_json::from_value(json.clone())
-            .map_err(|err| format!("Failed to parse Ollama response: {err}"))?;
-
-        match process_response(ollama_response) {
-            ChatEvent::Message(message) => {
-                if let Some(ContentPart::Text(text)) = message.content.first() {
-                    return Ok(Some(StreamEvent::Delta(StreamDelta {
-                        content: Some(vec![ContentPart::Text(text.clone())]),
-                        tool_calls: None,
-                    })));
-                }
-                Ok(None)
-            }
-            ChatEvent::ToolRequest(tool_calls) => Ok(Some(StreamEvent::Delta(StreamDelta {
-                content: None,
-                tool_calls: Some(tool_calls),
-            }))),
-            ChatEvent::Error(err) => Ok(Some(StreamEvent::Error(err))),
-        }
+        Ok(None)
     }
 }
 
@@ -126,7 +153,7 @@ impl Guest for OllamaComponent {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
         let client = OllamaApi::new();
-        match messages_to_request(messages, config) {
+        match messages_to_request(messages, config, &client) {
             Ok(request) => Self::request(&client, request),
             Err(err) => ChatEvent::Error(err),
         }
@@ -140,7 +167,7 @@ impl Guest for OllamaComponent {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
         let client = OllamaApi::new();
-        match messages_to_request(messages, config) {
+        match messages_to_request(messages, config, &client) {
             Ok(mut request) => {
                 request
                     .messages
@@ -161,7 +188,7 @@ impl ExtendedGuest for OllamaComponent {
         LOGGING_STATE.with_borrow_mut(|state| state.init());
 
         let client = OllamaApi::new();
-        match messages_to_request(messages, config) {
+        match messages_to_request(messages, config, &client) {
             Ok(request) => Self::streaming_request(&client, request),
             Err(err) => OllamaChatStream::failed(err),
         }

@@ -18,7 +18,7 @@ const MODEL: &'static str = "grok-3-beta";
 #[cfg(feature = "openrouter")]
 const MODEL: &'static str = "openrouter/auto";
 #[cfg(feature = "ollama")]
-const MODEL: &'static str = "llama2";
+const MODEL: &'static str = "llama3";
 
 #[cfg(feature = "openai")]
 const IMAGE_MODEL: &'static str = "gpt-4o-mini";

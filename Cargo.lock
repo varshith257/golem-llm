@@ -370,6 +370,7 @@ dependencies = [
 name = "golem-llm-ollama"
 version = "0.0.0"
 dependencies = [
+ "base64",
  "golem-llm",
  "golem-rust",
  "log",

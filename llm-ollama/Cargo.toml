@@ -18,6 +18,7 @@ durability = ["golem-rust/durability", "golem-llm/durability"]
 [dependencies]
 golem-llm = { path = "../llm", version = "0.0.0", default-features = false }
 
+base64 = { workspace = true }
 golem-rust = { workspace = true }
 log = { workspace = true }
 reqwest =  { workspace = true }
