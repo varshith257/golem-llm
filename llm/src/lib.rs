@@ -13,9 +13,6 @@ wit_bindgen::generate!({
     generate_unused_types: true,
     additional_derives: [PartialEq],
     pub_export_macro: true,
-    with: {
-        "wasi:io/poll@0.2.0": golem_rust::wasm_rpc::wasi::io::poll,
-    }
 });
 
 pub use crate::exports::golem;
