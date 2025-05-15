@@ -1,0 +1,177 @@
+name: CI
+on:
+  push:
+    tags:
+      - "v*.*.*"
+    branches:
+      - main
+  pull_request:
+env:
+  CARGO_TERM_COLOR: always
+  OLLAMA_API_BASE: "http://localhost:11434"
+jobs:
+  ollama-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-deps-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-deps-
+      
+      - name: Cache CLI tools
+        id: cache-cli-tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: ${{ runner.os }}-cli-tools-${{ hashFiles('./ci-tool-versions.txt', '**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cli-tools-
+      
+      - name: Ensure tool versions file exists
+        run: |
+          if [ ! -f "./ci-tool-versions.txt" ]; then
+            echo "cargo-make: stable" > ./ci-tool-versions.txt
+            echo "cargo-component: stable" >> ./ci-tool-versions.txt
+            echo "golem-cli: 1.2.2-dev.11" >> ./ci-tool-versions.txt
+            echo "wac-cli: stable" >> ./ci-tool-versions.txt
+            echo "golem-test-framework: stable" >> ./ci-tool-versions.txt
+          fi
+          
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          target: wasm32-wasip1
+          
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      
+      - name: Install CLI tools
+        if: steps.cache-cli-tools.outputs.cache-hit != 'true'
+        run: |
+          echo "Installing cargo-make..."
+          cargo install --locked cargo-make
+          
+          echo "Installing cargo-component..."
+          cargo install --locked cargo-component
+          
+          echo "Installing golem-cli..."
+          cargo install --locked golem-cli@1.2.2-dev.11
+          
+          echo "Installing wac-cli..."
+          cargo install --locked wac-cli
+          
+          echo "Installing golem-test-framework..."
+          cargo install --locked golem-test-framework
+          
+          echo "✅ All CLI tools installed successfully"
+      
+      - name: Verify CLI tools
+        run: |
+          cargo-make --version
+          cargo-component --version
+          golem-cli --version
+          wac --version
+          golem-test-framework --version
+      
+      - name: Cache Ollama models
+        id: cache-ollama-models
+        uses: actions/cache@v4
+        with:
+          path: ~/.ollama
+          key: ${{ runner.os }}-ollama-models-llama2-llava
+          restore-keys: |
+            ${{ runner.os }}-ollama-models-
+      
+      - name: Start Ollama Docker
+        run: |
+          mkdir -p ~/.ollama
+          docker run -d --name ollama-test \
+            -p 11434:11434 \
+            -v ~/.ollama:/root/.ollama \
+            ollama/ollama:latest
+          echo "Waiting for Ollama container to initialize..."
+          sleep 20
+      
+      - name: Verify Ollama container
+        run: |
+          curl -s http://localhost:11434/api/version || {
+            echo "❌ Ollama service not responding"
+            echo "Ollama container logs:"
+            docker logs ollama-test
+            exit 1
+          }
+          echo "✅ Ollama container is running correctly"
+      
+      - name: Pull required Ollama models
+        run: |
+          echo "Checking for cached models..."
+          MODELS_CACHED=$(curl -s http://localhost:11434/api/tags | grep -c -E 'llama2|llava' || echo "0")
+          
+          if [ "$MODELS_CACHED" -lt "2" ]; then
+            echo "Some models missing, pulling required models..."
+            
+            if ! curl -s http://localhost:11434/api/tags | grep -q "llama2"; then
+              echo "Pulling llama2 model..."
+              curl -X POST http://localhost:11434/api/pull -d '{"name":"llama2"}'
+            else
+              echo "llama2 model already available."
+            fi
+            
+            if ! curl -s http://localhost:11434/api/tags | grep -q "llava"; then
+              echo "Pulling llava model..."
+              curl -X POST http://localhost:11434/api/pull -d '{"name":"llava"}'
+            else
+              echo "llava model already available."
+            fi
+          else
+            echo "All models already cached."
+          fi
+          
+          echo "Verifying models are available..."
+          curl -s http://localhost:11434/api/tags | grep llama2 || { echo "❌ llama2 model not found"; exit 1; }
+          curl -s http://localhost:11434/api/tags | grep llava || { echo "❌ llava model not found"; exit 1; }
+          echo "✅ All required models are available"
+      
+      - name: Build test components
+        run: |
+          echo "Building test components..."
+          cargo make build-test-components
+          echo "✅ Test components built successfully"
+      
+      - name: Compose with wac (durable)
+        run: |
+          echo "Composing WASM components (durable)..."
+          wac plug --plug ./target/wasm32-wasip1/debug/golem_llm_ollama.wasm \
+                   ./target/wasm32-wasip1/debug/test_llm.wasm \
+                   -o ./target/wasm32-wasip1/debug/test_llm_composed.wasm
+          echo "✅ Components composed successfully"
+      
+      - name: Run tests via golem-test-framework
+        run: |
+          echo "Running tests via golem-test-framework..."
+          golem-test-framework run \
+            --wasm ./target/wasm32-wasip1/debug/test_llm_composed.wasm \
+            --profile ollama-debug \
+            --assert-nonempty
+          echo "✅ All tests passed successfully"
+      
+      - name: Stop Ollama container
+        if: always()
+        run: |
+          echo "Cleaning up Ollama container..."
+          docker rm -f ollama-test
+          echo "✅ Cleanup completed"
+      
+      - name: All tests passed
+        run: echo "🎉 All Ollama tests completed successfully!"
