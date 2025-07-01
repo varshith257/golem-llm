@@ -44,10 +44,22 @@ pub fn messages_to_input_items(messages: Vec<Message>) -> Vec<InputItem> {
     let mut items = Vec::new();
     for message in messages {
         let role = to_openai_role_name(message.role).to_string();
-        let mut input_items = Vec::new();
-        for content_part in message.content {
-            input_items.push(content_part_to_inner_input_item(content_part));
-        }
+        let input_items: Vec<InnerInputItem> = message
+            .content
+            .into_iter()
+            .map(|part| match part {
+                ContentPart::Text(txt) => {
+                    if message.role == Role::Assistant {
+                        InnerInputItem::OutputText { text: txt }
+                    } else {
+                        InnerInputItem::TextInput { text: txt }
+                    }
+                }
+                ContentPart::Image(img) => {
+                    content_part_to_inner_input_item(ContentPart::Image(img))
+                }
+            })
+            .collect();
 
         items.push(InputItem::InputMessage {
             role,
